@@ -1,0 +1,373 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Easing Curves (Emil Kowalski) ──────────────────────────────────────── */
+/* "Custom curves are not optional. Built-in CSS easings are too weak." */
+:root {
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ─── Paleta OSCURA (por defecto) ─────────────────────────────────────────── */
+:root {
+  /* Semantic color tokens — auto-flip between dark/light via variables */
+  --c-success: 52 211 153;   /* emerald-400 — bright on dark */
+  --c-warning: 251 191 36;   /* yellow-400 */
+  --c-orange:  251 146 60;   /* orange-400 */
+  --c-danger:  248 113 113;  /* red-400 */
+  --c-info:     96 165 250;  /* blue-400 */
+  --c-purple:  196 181 253;  /* purple-400 */
+
+  /* Neutral scale — space-separated RGB for Tailwind opacity modifiers */
+  --d50:  248 250 252;
+  --d100: 241 245 249;
+  --d200: 226 232 240;
+  --d300: 203 213 225;
+  --d400: 148 163 184;
+  --d500: 100 116 139;
+  --d600:  71  85 105;
+  --d700:  51  65  85;
+  --d800:  30  41  59;
+  --d850:  23  32  50;
+  --d900:  15  23  42;
+  --d950:   9  14  26;
+
+  --toast-bg:     #1e293b;
+  --toast-color:  #e2e8f0;
+  --toast-border: #334155;
+}
+
+/* ─── Paleta CLARA (diseñada correctamente, NO solo invertida) ─────────── */
+/* Impeccable: "Dark mode is NOT inverted light mode." */
+/* Contrast verified: all text tokens ≥ 4.5:1 on their respective bg tokens */
+[data-theme="light"] {
+  /* Semantic — DARKER values for WCAG AA on white backgrounds           */
+  /* emerald-800 (6,95,70)   → 7.7:1 on white  ✓                        */
+  /* amber-800  (120,53,15)  → 8.9:1 on white  ✓                        */
+  /* orange-800 (154,52,18)  → 7.0:1 on white  ✓                        */
+  /* red-700    (185,28,28)  → 6.2:1 on white  ✓                        */
+  /* blue-700   (29,78,216)  → 6.4:1 on white  ✓                        */
+  /* purple-700 (109,40,217) → 6.9:1 on white  ✓                        */
+  --c-success:   6  95  70;
+  --c-warning:  120  53  15;
+  --c-orange:   154  52  18;
+  --c-danger:   185  28  28;
+  --c-info:      29  78 216;
+  --c-purple:   109  40 217;
+
+  /* Backgrounds: high numbers = light (most elements stay semantic)     */
+  --d950: 255 255 255;   /* pure white — body bg                         */
+  --d900: 248 250 252;   /* near white — page/card bg                    */
+  --d850: 241 245 249;   /* very light — sidebar bg                      */
+  --d800: 228 233 242;   /* subtle highlight                             */
+
+  /* Borders */
+  --d700: 210 218 232;   /* visible border on light bg                   */
+
+  /* !! CRITICAL CONTRAST FIX !!                                         */
+  /* Old values (rgb 148,163,184 and 100,116,139) failed contrast on     */
+  /* light backgrounds (~2:1). These new values pass WCAG AAA.           */
+  --d600:  68  84 106;   /* muted text  — 7.7:1 on d900 ✓ AAA            */
+  --d500:  50  65  88;   /* secondary   — 9.2:1 on d900 ✓ AAA            */
+
+  /* Primary text */
+  --d400:  35  50  72;
+  --d300:  20  33  58;
+  --d200:  10  20  44;
+  --d100:   4  12  30;
+  --d50:    2   6  18;
+
+  --toast-bg:     #f8fafc;
+  --toast-color:  #0f172a;
+  --toast-border: #d2dae8;
+}
+
+/* ─── Base ────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    font-size: 16px;   /* up from 15px — WCAG minimum for body text */
+  }
+
+  * { @apply border-dark-700; }
+
+  body {
+    @apply bg-dark-950 text-dark-100 font-sans antialiased;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    transition: background-color 0.2s, color 0.2s;
+  }
+
+  /* Tabular numerals in data contexts */
+  td, .tabnum { font-variant-numeric: tabular-nums; }
+
+  /* Balanced headings (Impeccable: typography) */
+  h1, h2, h3 { text-wrap: balance; }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar       { @apply w-1.5 h-1.5; }
+  ::-webkit-scrollbar-track { @apply bg-dark-900; }
+  ::-webkit-scrollbar-thumb { @apply bg-dark-700 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-dark-600; }
+}
+
+/* ─── Componentes ─────────────────────────────────────────────────────────── */
+@layer components {
+
+  /* ── Card ─────────────────────────────────────────────── */
+  .card        { @apply bg-dark-900 border border-dark-700/60 rounded-xl; }
+  .card-header { @apply px-5 py-4 border-b border-dark-700/60; }
+  .card-body   { @apply p-5; }
+
+  /* ── Buttons ──────────────────────────────────────────── */
+  /* Emil: "Buttons must feel responsive to press."         */
+  /* Add scale(0.97) on :active — confirms the UI heard you */
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+           disabled:opacity-40 disabled:cursor-not-allowed select-none
+           active:scale-[0.97];
+    transition: background-color 150ms ease,
+                border-color     150ms ease,
+                color            150ms ease,
+                transform        120ms var(--ease-out),
+                box-shadow       150ms ease;
+  }
+
+  .btn-primary {
+    @apply btn bg-primary-600 hover:bg-primary-500 text-white;
+    box-shadow: 0 1px 3px rgb(79 70 229 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.08);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 2px 6px rgb(79 70 229 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.1);
+  }
+
+  .btn-secondary {
+    @apply btn bg-dark-800 hover:bg-dark-700 text-dark-200 border border-dark-700
+           hover:border-dark-600 hover:text-dark-100;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+
+  .btn-success {
+    @apply btn bg-emerald-700 hover:bg-emerald-600 text-white;
+    box-shadow: 0 1px 3px rgb(5 150 105 / 0.3);
+  }
+
+  .btn-danger {
+    @apply btn bg-red-700 hover:bg-red-600 text-white;
+    box-shadow: 0 1px 3px rgb(185 28 28 / 0.25);
+  }
+
+  .btn-ghost {
+    @apply btn hover:bg-dark-800 text-dark-400 hover:text-dark-200;
+  }
+
+  /* ── Input ────────────────────────────────────────────── */
+  .input {
+    @apply w-full bg-dark-800 border border-dark-700 text-dark-100 rounded-lg px-3 py-2
+           text-sm placeholder-dark-500
+           focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .input:focus {
+    box-shadow: 0 0 0 3px rgb(99 102 241 / 0.12);
+  }
+
+  /* ── Badge ────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold
+           leading-none;
+  }
+
+  /* ── Semantic Status Badges (theme-aware via CSS vars) ── */
+  /* Uses --c-* variables that flip automatically per theme  */
+  /* Dark: bright saturated tones on dark bg                 */
+  /* Light: dark desaturated tones on light bg               */
+  .s-pending {
+    background: rgb(var(--d700) / 0.35);
+    color: rgb(var(--d300));
+    border: 1px solid rgb(var(--d600) / 0.35);
+  }
+  .s-correctable {
+    background: rgb(var(--c-warning) / 0.12);
+    color: rgb(var(--c-warning));
+    border: 1px solid rgb(var(--c-warning) / 0.3);
+  }
+  .s-review {
+    background: rgb(var(--c-orange) / 0.12);
+    color: rgb(var(--c-orange));
+    border: 1px solid rgb(var(--c-orange) / 0.3);
+  }
+  .s-critical {
+    background: rgb(var(--c-danger) / 0.12);
+    color: rgb(var(--c-danger));
+    border: 1px solid rgb(var(--c-danger) / 0.3);
+  }
+  .s-approved {
+    background: rgb(var(--c-success) / 0.12);
+    color: rgb(var(--c-success));
+    border: 1px solid rgb(var(--c-success) / 0.3);
+  }
+  .s-rejected {
+    background: rgb(var(--d700) / 0.25);
+    color: rgb(var(--d500));
+    border: 1px solid rgb(var(--d600) / 0.25);
+  }
+  .s-applied {
+    background: rgb(var(--c-purple) / 0.12);
+    color: rgb(var(--c-purple));
+    border: 1px solid rgb(var(--c-purple) / 0.3);
+  }
+  .s-ok {
+    background: rgb(var(--c-success) / 0.1);
+    color: rgb(var(--c-success));
+    border: 1px solid rgb(var(--c-success) / 0.25);
+  }
+  .s-analyzing {
+    background: rgb(var(--c-info) / 0.12);
+    color: rgb(var(--c-info));
+    border: 1px solid rgb(var(--c-info) / 0.3);
+  }
+
+  /* ── Semantic text colors ─────────────────────────────── */
+  .text-c-success { color: rgb(var(--c-success)); }
+  .text-c-warning { color: rgb(var(--c-warning)); }
+  .text-c-orange  { color: rgb(var(--c-orange));  }
+  .text-c-danger  { color: rgb(var(--c-danger));  }
+  .text-c-info    { color: rgb(var(--c-info));    }
+  .text-c-purple  { color: rgb(var(--c-purple));  }
+
+  /* ── Table ────────────────────────────────────────────── */
+  .table-row-hover {
+    @apply hover:bg-dark-800/50 transition-colors cursor-pointer;
+  }
+
+  /* ── Sidebar ──────────────────────────────────────────── */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .sidebar-item-active {
+    @apply sidebar-item bg-dark-800 text-dark-100;
+    box-shadow: inset 3px 0 0 rgb(99 102 241 / 0.85);
+    padding-left: calc(0.75rem - 1px);
+  }
+  .sidebar-item-inactive {
+    @apply sidebar-item text-dark-400 hover:text-dark-200 hover:bg-dark-800/70;
+  }
+
+  .stat-card  { @apply card p-5 flex flex-col gap-1; }
+  .glow-primary { @apply shadow-lg shadow-primary-900/20; }
+}
+
+/* ─── Utilidades ──────────────────────────────────────────────────────────── */
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-400 to-blue-400 bg-clip-text text-transparent;
+  }
+
+  .animate-fade-in  { animation: fadeIn  0.18s var(--ease-out) both; }
+  .animate-slide-in { animation: slideIn 0.22s var(--ease-out) both; }
+  .animate-slide-up { animation: slideUp 0.22s var(--ease-out) both; }
+
+  /* Emil: "Use @starting-style for entry animations — no JS needed" */
+  /* Fallback JS-compatible: opacity + transform from slightly off */
+}
+
+@keyframes fadeIn  {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideIn {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+@keyframes slideUp {
+  from { transform: translateY(12px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+
+/* ─── Toaster — respeta tema ──────────────────────────────────────────────── */
+.react-hot-toast { @apply font-sans; }
+
+/* ─── Panel resize handle ─────────────────────────────────────────────────── */
+.panel-resize-handle {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  z-index: 20;
+  transition: background-color 0.15s;
+}
+.panel-resize-handle:hover,
+.panel-resize-handle.resizing {
+  background-color: rgb(99 102 241 / 0.45);
+}
+
+/* ─── Light mode table stripes ────────────────────────────────────────────── */
+[data-theme="light"] tbody tr:nth-child(even) {
+  background-color: rgb(var(--d850) / 0.5);
+}
+
+/* ─── Light mode: inline Tailwind color corrections ──────────────────────── */
+/* Impeccable: "Contrast ≥ 4.5:1 for body text, ≥ 3:1 for UI components"   */
+/* These override bright saturated Tailwind colors that work on dark bg     */
+/* but fail WCAG on the near-white surfaces in light mode.                  */
+
+/* Primary (indigo-400 = 2.9:1 on white → use indigo-600 = 5.7:1) */
+[data-theme="light"] .text-primary-300 { color: rgb(99 102 241); }
+[data-theme="light"] .text-primary-400 { color: rgb(79 70 229); }
+[data-theme="light"] .text-primary-500 { color: rgb(67 56 202); }
+[data-theme="light"] .bg-primary-900\/20 { background-color: rgb(238 242 255 / 0.9); }
+
+/* Greens / emerald */
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-emerald-400,
+[data-theme="light"] .text-emerald-500 { color: rgb(6 95 70); }   /* 7.7:1 ✓ */
+[data-theme="light"] .text-green-400   { color: rgb(21 128 61); }
+
+/* Yellows / amber */
+[data-theme="light"] .text-yellow-300,
+[data-theme="light"] .text-yellow-400  { color: rgb(120 53 15); } /* 8.9:1 ✓ */
+[data-theme="light"] .text-amber-500   { color: rgb(120 53 15); }
+
+/* Oranges */
+[data-theme="light"] .text-orange-400  { color: rgb(154 52 18); } /* 7.0:1 ✓ */
+
+/* Reds */
+[data-theme="light"] .text-red-300,
+[data-theme="light"] .text-red-400     { color: rgb(185 28 28); } /* 6.2:1 ✓ */
+
+/* Blues */
+[data-theme="light"] .text-blue-400    { color: rgb(29 78 216); } /* 6.4:1 ✓ */
+
+/* Purples */
+[data-theme="light"] .text-purple-400  { color: rgb(109 40 217); } /* 6.9:1 ✓ */
+
+/* Error / validation banners — invert background for light mode */
+[data-theme="light"] .bg-red-900\/15     { background-color: rgb(254 242 242); }
+[data-theme="light"] .border-red-800\/30 { border-color: rgb(252 165 165); }
+[data-theme="light"] .bg-yellow-900\/15  { background-color: rgb(255 251 235); }
+[data-theme="light"] .border-yellow-800\/30 { border-color: rgb(253 211 77); }
+[data-theme="light"] .bg-amber-900\/10   { background-color: rgb(255 251 235); }
+[data-theme="light"] .border-amber-700\/30  { border-color: rgb(217 119 6 / 0.35); }
+[data-theme="light"] .bg-emerald-900\/10,
+[data-theme="light"] .bg-emerald-900\/25 { background-color: rgb(236 253 245); }
+[data-theme="light"] .border-emerald-500  { border-color: rgb(16 185 129); }
+[data-theme="light"] .border-emerald-800\/20 { border-color: rgb(167 243 208); }
+[data-theme="light"] .bg-blue-900\/10    { background-color: rgb(239 246 255); }
+[data-theme="light"] .border-blue-800\/20 { border-color: rgb(191 219 254); }
+[data-theme="light"] .bg-primary-900\/20 { background-color: rgb(238 242 255); }
+[data-theme="light"] .border-primary-700\/40 { border-color: rgb(165 180 252); }
+
+/* ─── Reduced motion support (Emil: "Remove movement, keep opacity") ─────── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in, .animate-slide-in, .animate-slide-up {
+    animation: fadeIn 0.1s ease both;
+  }
+  .btn { transition: background-color 100ms ease, color 100ms ease; }
+  .btn:active:not(:disabled) { transform: none; }
+}

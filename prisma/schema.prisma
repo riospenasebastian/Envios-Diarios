@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  shopifyId       String   @unique
+  shopifyOrderNum String
+  customerName    String
+  customerPhone   String?
+  customerEmail   String?
+
+  // Dirección original Shopify (NUNCA se modifica)
+  origAddress1    String
+  origAddress2    String?
+  origCity        String
+  origState       String
+  origZip         String
+  origCountry     String   @default("MX")
+
+  // Dirección sugerida/corregida (propuesta del sistema)
+  sugAddress1     String?
+  sugAddress2     String?
+  sugCity         String?
+  sugState        String?
+  sugZip          String?
+  sugColonia      String?
+  sugReference    String?
+
+  // Colonia detectada
+  detectedColonia  String?
+  originalColonia  String?
+
+  // Análisis
+  errorType        String?   // ErrorType enum as string
+  errorDetails     String?
+  confidence       String    @default("UNKNOWN") // ConfidenceLevel
+  validationNotes  String?
+
+  // Estado del pedido en el sistema
+  status           String    @default("PENDING") // OrderStatus enum as string
+
+  // Shopify metadata
+  shopifyLink      String?
+  mapLink          String?
+  shopifyCreatedAt DateTime?
+  syncedAt         DateTime  @default(now())
+
+  // Aprobación manual
+  approvedAt       DateTime?
+  approvedBy       String?
+  rejectedAt       DateTime?
+  rejectedReason   String?
+
+  // Colonias sugeridas (JSON) para el picker de UI cuando hay múltiples opciones
+  // Formato: [{colonia, cp, matchPct?}]
+  sugColoniasJson  String?
+
+  // EnviaTodo
+  enviatodoId      String?
+  guideNumber      String?
+  appliedAt        DateTime?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  logs             Log[]
+  corrections      Correction[]
+}
+
+model Correction {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id])
+
+  field       String   // campo modificado
+  oldValue    String?
+  newValue    String?
+  source      String   // "system" | "manual"
+  confidence  String?
+
+  createdAt   DateTime @default(now())
+}
+
+model Colonia {
+  id         Int    @id @default(autoincrement())
+  colonia    String
+  cp         String
+  municipio  String
+  estado     String
+  coloniaNorm String // normalizada para búsqueda
+
+  @@index([cp])
+  @@index([municipio])
+  @@index([estado])
+  @@index([coloniaNorm])
+}
+
+model Log {
+  id        String   @id @default(cuid())
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id])
+  level     String   @default("INFO") // LogLevel
+  action    String
+  message   String
+  details   String?
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model SyncSession {
+  id          String   @id @default(cuid())
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  status      String   @default("RUNNING") // "RUNNING" | "DONE" | "ERROR"
+  ordersFound Int      @default(0)
+  ordersNew   Int      @default(0)
+  errorMsg    String?
+}
+
+// Historial permanente de pedidos aplicados en EnviaTodo.
+// Se consulta en cada sync para no re-importar pedidos ya procesados.
+// Nunca se borra — es el registro permanente de lo que ya se envió.
+model AppliedHistory {
+  id              String   @id @default(cuid())
+  shopifyId       String   @unique
+  shopifyOrderNum String
+  customerName    String
+  origAddress1    String
+  origCity        String
+  origZip         String
+  appliedColonia  String?
+  appliedZip      String?
+  appliedAddress1 String?
+  appliedAt       DateTime @default(now())
+}
