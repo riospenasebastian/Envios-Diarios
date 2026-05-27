@@ -371,3 +371,36 @@
   .btn { transition: background-color 100ms ease, color 100ms ease; }
   .btn:active:not(:disabled) { transform: none; }
 }
+
+/* ─── Alta resolución: ≥ 1920 px (FHD extremo / QHD) ─────────────────────── */
+/* Emil: "Scale to screen — a 2K monitor is not a large phone."               */
+@media (min-width: 1920px) {
+  :root { font-size: 17px; }
+
+  .sidebar-item {
+    @apply text-[16px] py-3 px-3.5;
+  }
+
+  .btn        { @apply px-5 py-2.5 text-[15px]; }
+  .input      { @apply px-4 py-2.5 text-[15px]; }
+  .badge      { @apply px-3 py-1 text-[13px]; }
+  .card-header{ @apply px-6 py-5; }
+  .card-body  { @apply p-6; }
+  .stat-card  { @apply p-6; }
+
+  /* Table rows roomier */
+  td, th { padding-top: 0.6rem !important; padding-bottom: 0.6rem !important; }
+}
+
+/* ─── Alta resolución: ≥ 2560 px (2K / WQHD) ─────────────────────────────── */
+@media (min-width: 2560px) {
+  :root { font-size: 19px; }
+
+  .sidebar-item { @apply text-[17px] py-3.5 px-4; }
+
+  .btn   { @apply px-6 py-3 text-[16px]; }
+  .input { @apply px-4 py-3 text-[16px]; }
+  .badge { @apply px-3.5 py-1.5 text-[14px]; }
+
+  ::-webkit-scrollbar       { @apply w-2 h-2; }
+}

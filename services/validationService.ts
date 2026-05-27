@@ -95,6 +95,17 @@ function abbreviateAddress(text: string): string {
   return r.replace(/\s{2,}/g, " ").trim();
 }
 
+const MAX_REFERENCE_CHARS = 25;
+
+/** Truncates a reference string to MAX_REFERENCE_CHARS, preferring a word boundary. */
+function capReference(ref: string): string {
+  const r = ref.trim();
+  if (r.length <= MAX_REFERENCE_CHARS) return r;
+  const sub = r.slice(0, MAX_REFERENCE_CHARS);
+  const lastSpace = sub.lastIndexOf(" ");
+  return lastSpace > 5 ? sub.slice(0, lastSpace).trim() : sub.trim();
+}
+
 function splitAddress(addr: string, maxChars: number): { address1: string; reference: string } {
   const abbr = abbreviateAddress(addr);
   if (abbr.length <= maxChars) return { address1: abbr, reference: "" };
@@ -104,19 +115,19 @@ function splitAddress(addr: string, maxChars: number): { address1: string; refer
     const idx = lower.indexOf(kw);
     if (idx > 5) {
       const main = abbr.slice(0, idx).trim().replace(/[,\s]+$/, "");
-      if (main.length <= maxChars) return { address1: main, reference: abbr.slice(idx).trim() };
+      if (main.length <= maxChars) return { address1: main, reference: capReference(abbr.slice(idx)) };
     }
   }
 
   const sub = abbr.slice(0, maxChars + 1);
   const commaIdx = sub.lastIndexOf(",");
-  if (commaIdx > 10) return { address1: abbr.slice(0, commaIdx).trim(), reference: abbr.slice(commaIdx + 1).trim() };
+  if (commaIdx > 10) return { address1: abbr.slice(0, commaIdx).trim(), reference: capReference(abbr.slice(commaIdx + 1)) };
 
   const subFit = abbr.slice(0, maxChars);
   const lastSpace = subFit.lastIndexOf(" ");
-  if (lastSpace > 15) return { address1: abbr.slice(0, lastSpace).trim(), reference: abbr.slice(lastSpace).trim() };
+  if (lastSpace > 15) return { address1: abbr.slice(0, lastSpace).trim(), reference: capReference(abbr.slice(lastSpace)) };
 
-  return { address1: abbr.slice(0, maxChars), reference: abbr.slice(maxChars) };
+  return { address1: abbr.slice(0, maxChars), reference: capReference(abbr.slice(maxChars)) };
 }
 
 function truncateName(name: string, max: number): string {

@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className="dark" suppressHydrationWarning>
-      <body className="bg-dark-950 text-dark-100 min-h-screen">
+      <body className="bg-dark-950 text-dark-100 min-h-screen" suppressHydrationWarning>
         <ThemeProvider>
           <div className="flex h-screen overflow-hidden">
             <Sidebar />

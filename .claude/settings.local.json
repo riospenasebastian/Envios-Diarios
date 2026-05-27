@@ -19,7 +19,8 @@
       "WebFetch(domain:impeccable.style)",
       "WebFetch(domain:www.tasteskill.dev)",
       "Bash(npx skills *)",
-      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('Next:', p.dependencies.next, 'React:', p.dependencies.react\\)\")"
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('Next:', p.dependencies.next, 'React:', p.dependencies.react\\)\")",
+      "Bash(dir \"C:\\\\Users\\\\sebas\\\\Desktop\\\\app facebook ads\\\\app envios\\\\CLaude\\\\playwright\" /b)"
     ]
   }
 }

@@ -6,7 +6,7 @@ import {
   Save, Eye, EyeOff, Upload, Database, Chrome, Settings,
   ShoppingBag, Truck, RefreshCw, CheckCircle2, Terminal,
   Play, Square, Code2, FileCode, Trash2, ChevronDown, ChevronUp,
-  Copy, Zap, BookOpen, AlertTriangle, StopCircle, List,
+  Copy, Zap, BookOpen, AlertTriangle, StopCircle, List, FilePlus2, ClipboardPaste,
 } from "lucide-react";
 import Spinner from "@/components/ui/Spinner";
 import { cn } from "@/lib/utils";
@@ -191,6 +191,12 @@ export default function SettingsPage() {
   const [codegenSteps, setCodegenSteps] = useState<string[]>([]);
   const [showCodegenRaw, setShowCodegenRaw] = useState(false);
   const [showCodegenLogs, setShowCodegenLogs] = useState(false);
+
+  // Upload / importar flujo
+  const [uploadTab, setUploadTab] = useState<"file" | "paste">("file");
+  const [uploadDragOver, setUploadDragOver] = useState(false);
+  const [pasteCode, setPasteCode] = useState("");
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   // Guardar script grabado
   const [saveScriptName, setSaveScriptName] = useState("");
@@ -436,6 +442,39 @@ export default function SettingsPage() {
     finally { setSavingScript(false); }
   }
 
+  // ── Importar flujo (archivo o pegado) ────────────────
+
+  /** Carga código en el estado de codegen (igual que detener grabación). */
+  async function handleLoadCode(code: string, filename?: string) {
+    const trimmed = code.trim();
+    if (!trimmed) { toast.error("El código está vacío"); return; }
+    setCodegenCode(trimmed);
+    setSavedScriptName(null);
+    setShowCodegenRaw(false);
+    // Nombre sugerido a partir del archivo o timestamp
+    const suggestedName = filename
+      ? filename.replace(/\.(ts|js|txt)$/i, "")
+      : defaultScriptName();
+    setSaveScriptName(suggestedName);
+    // Parsear pasos (reutiliza el endpoint existente)
+    try {
+      const parseRes = await fetch("/api/playwright/scripts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "parse", code: trimmed }),
+      });
+      const parseData = await parseRes.json();
+      if (parseData.success) setCodegenSteps(parseData.steps ?? []);
+    } catch { /* silencioso */ }
+    toast.success("Flujo cargado — revisa los pasos y guárdalo");
+  }
+
+  async function handleFileUpload(file: File) {
+    if (!file) return;
+    const text = await file.text();
+    await handleLoadCode(text, file.name);
+  }
+
   // ── Script library ────────────────────────────────────
 
   async function handleExpandScript(name: string) {
@@ -655,6 +694,112 @@ export default function SettingsPage() {
             <li>Haz clic en <strong className="text-blue-300">Detener grabación</strong>.</li>
             <li>Revisa los pasos detectados y guarda el script con un nombre.</li>
           </ol>
+        </div>
+
+        {/* ── Importar flujo externo ─────────────────────────────── */}
+        <div className="border border-dark-700 rounded-xl overflow-hidden">
+          {/* Header con tabs */}
+          <div className="flex items-center gap-0 bg-dark-800/60 border-b border-dark-700">
+            <button
+              onClick={() => setUploadTab("file")}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors",
+                uploadTab === "file"
+                  ? "border-primary-500 text-primary-300 bg-dark-800/80"
+                  : "border-transparent text-dark-400 hover:text-dark-200"
+              )}
+            >
+              <FilePlus2 className="w-3.5 h-3.5" />
+              Subir archivo
+            </button>
+            <button
+              onClick={() => setUploadTab("paste")}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors",
+                uploadTab === "paste"
+                  ? "border-primary-500 text-primary-300 bg-dark-800/80"
+                  : "border-transparent text-dark-400 hover:text-dark-200"
+              )}
+            >
+              <ClipboardPaste className="w-3.5 h-3.5" />
+              Pegar código
+            </button>
+            <span className="ml-auto px-4 text-xs text-dark-600">Importar flujo</span>
+          </div>
+
+          {/* Tab: Archivo */}
+          {uploadTab === "file" && (
+            <div className="p-4">
+              {/* Zona drag-and-drop */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); setUploadDragOver(true); }}
+                onDragLeave={() => setUploadDragOver(false)}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  setUploadDragOver(false);
+                  const file = e.dataTransfer.files[0];
+                  if (file) await handleFileUpload(file);
+                }}
+                onClick={() => uploadInputRef.current?.click()}
+                className={cn(
+                  "relative flex flex-col items-center justify-center gap-2 py-8 rounded-lg border-2 border-dashed cursor-pointer transition-all",
+                  uploadDragOver
+                    ? "border-primary-400 bg-primary-900/15 text-primary-300"
+                    : "border-dark-600 bg-dark-900/40 text-dark-500 hover:border-dark-500 hover:bg-dark-800/50 hover:text-dark-300"
+                )}
+              >
+                <Upload className="w-8 h-8 opacity-60" />
+                <div className="text-center">
+                  <p className="text-sm font-medium">Arrastra un archivo o haz clic</p>
+                  <p className="text-xs text-dark-600 mt-0.5">Acepta .ts · .js · .txt</p>
+                </div>
+              </div>
+              {/* Input oculto */}
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept=".ts,.js,.txt"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) await handleFileUpload(file);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
+
+          {/* Tab: Pegar código */}
+          {uploadTab === "paste" && (
+            <div className="p-4 space-y-3">
+              <textarea
+                rows={8}
+                className="input font-mono text-xs resize-y"
+                placeholder={"// Pega aquí tu script de Playwright...\nimport { chromium } from '@playwright/test';\n..."}
+                value={pasteCode}
+                onChange={(e) => setPasteCode(e.target.value)}
+                spellCheck={false}
+              />
+              <button
+                onClick={async () => {
+                  await handleLoadCode(pasteCode);
+                  setPasteCode("");
+                }}
+                disabled={!pasteCode.trim()}
+                className="btn-primary w-full justify-center"
+              >
+                <FilePlus2 className="w-4 h-4" />
+                Cargar flujo
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Separador visual antes de grabación */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-dark-700/60" />
+          <span className="text-xs text-dark-600 font-medium">o graba uno nuevo</span>
+          <div className="flex-1 h-px bg-dark-700/60" />
         </div>
 
         {/* Controles */}

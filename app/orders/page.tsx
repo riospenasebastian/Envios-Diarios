@@ -568,22 +568,72 @@ interface BulkConsoleProps {
   total: number;
   errors: number;
   currentOrder: string;
+  height: number;
+  onHeightChange: (h: number) => void;
   onStop: () => void;
   onClear: () => void;
   onClose: () => void;
 }
 
-function BulkConsole({ running, log, done, total, errors, currentOrder, onStop, onClear, onClose }: BulkConsoleProps) {
+function BulkConsole({ running, log, done, total, errors, currentOrder, height, onHeightChange, onStop, onClear, onClose }: BulkConsoleProps) {
   const logRef = useRef<HTMLPreElement>(null);
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
+  // Refs estables para evitar stale closures en mousemove/mouseup
+  const resizingRef = useRef(false);
+  const startYRef = useRef(0);
+  const startHRef = useRef(height);
+  const heightRef = useRef(height);
+  useEffect(() => { heightRef.current = height; }, [height]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizingRef.current) return;
+      // Arrastrar hacia ARRIBA → consola más ALTA
+      const dy = startYRef.current - e.clientY;
+      const minH = 140;
+      const maxH = Math.round(window.innerHeight * 0.9);
+      const newH = Math.min(maxH, Math.max(minH, startHRef.current + dy));
+      onHeightChange(newH);
+    };
+    const onUp = () => {
+      if (!resizingRef.current) return;
+      resizingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem("bulkConsoleHeight", String(heightRef.current));
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [onHeightChange]);
+
   const pct = total > 0 ? Math.round(((done + errors) / total) * 100) : 0;
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 bg-dark-950 border-t-2 border-primary-600/40 shadow-2xl animate-slide-up"
-      style={{ height: "42vh" }}>
+      style={{ height }}>
+
+      {/* Handle para redimensionar — barra horizontal arriba */}
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault();
+          resizingRef.current = true;
+          startYRef.current = e.clientY;
+          startHRef.current = height;
+          document.body.style.cursor = "row-resize";
+          document.body.style.userSelect = "none";
+        }}
+        title="Arrastra para redimensionar"
+        className="absolute -top-1.5 left-0 right-0 h-3 cursor-row-resize group z-30 flex items-center justify-center"
+      >
+        <div className="h-1 w-16 rounded-full bg-dark-700 group-hover:bg-primary-500/70 transition-colors" />
+      </div>
 
       {/* Header consola */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-dark-800">
@@ -694,14 +744,35 @@ function OrdersContent() {
   const [consoleLog, setConsoleLog] = useState("");
   const [consoleProgress, setConsoleProgress] = useState({ done: 0, total: 0, errors: 0, current: "" });
 
+  // ── Altura de la consola (resizable, persistida) ──────
+  const [consoleHeight, setConsoleHeight] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = parseInt(localStorage.getItem("bulkConsoleHeight") ?? "0");
+      if (saved > 0) return saved;
+      return Math.round(window.innerHeight * 0.42);
+    }
+    return 400;
+  });
+
   // ── Opciones de automatización ─────────────────────────
   // headlessMode: true = segundo plano (sin ventana), false = ventana visible
   const [headlessMode, setHeadlessMode] = useState(true);
 
+  // ── Selector de flujo ──────────────────────────────────
+  // null = flujo automático built-in; "nombre.ts" = script guardado
+  const [selectedScript, setSelectedScript] = useState<string | null>(null);
+  const [availableScripts, setAvailableScripts] = useState<{ name: string; stepCount: number }[]>([]);
+  const [soloRunning, setSoloRunning] = useState(false);
+
   // ── Ancho del panel lateral (resizable) ───────────────
+  // Mínimo: 320 px. Máximo: 50% del viewport (para pantallas 2K+).
+  const panelMaxWidth = () =>
+    typeof window !== "undefined" ? Math.round(window.innerWidth * 0.5) : 750;
+
   const [panelWidth, setPanelWidth] = useState(() => {
     if (typeof window !== "undefined") {
-      return parseInt(localStorage.getItem("panelWidth") ?? "480");
+      const saved = parseInt(localStorage.getItem("panelWidth") ?? "480");
+      return Math.min(saved, panelMaxWidth());
     }
     return 480;
   });
@@ -718,7 +789,7 @@ function OrdersContent() {
       if (!resizingRef.current) return;
       // Arrastrando hacia la izquierda → panel más ancho
       const dx = resizeStartX.current - e.clientX;
-      const newW = Math.min(750, Math.max(320, resizeStartW.current + dx));
+      const newW = Math.min(panelMaxWidth(), Math.max(320, resizeStartW.current + dx));
       setPanelWidth(newW);
     };
     const onMouseUp = () => {
@@ -768,6 +839,24 @@ function OrdersContent() {
   }, [status, search, page, errorFilter, selectedId]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  // ── Cargar lista de scripts disponibles ─────────────
+  useEffect(() => {
+    fetch("/api/playwright/scripts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list" }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) setAvailableScripts(
+          d.scripts
+            .filter((s: { name: string }) => s.name !== "playwright.config.ts")
+            .map((s: { name: string; stepCount: number }) => ({ name: s.name, stepCount: s.stepCount }))
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Auto-refresh ────────────────────────────────────
   useEffect(() => {
@@ -931,6 +1020,31 @@ function OrdersContent() {
     finally { setBulkLoading(null); }
   }
 
+  // ── Ejecutar script sin pedidos (standalone) ────────
+  async function runScriptAlone() {
+    if (!selectedScript) { toast.error("Selecciona un script primero"); return; }
+    setSoloRunning(true);
+    setShowConsole(true);
+    setConsoleLog(`[SOLO] Ejecutando ${selectedScript} sin datos de pedido…\n`);
+    setConsoleProgress({ done: 0, total: 0, errors: 0, current: selectedScript });
+    try {
+      const res = await fetch("/api/playwright/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", script: selectedScript, headless: headlessMode }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConsoleRunning(true);
+        toast.success(`Ejecutando ${selectedScript}…`);
+      } else {
+        toast.error(data.message ?? "Error al iniciar");
+        setShowConsole(false);
+      }
+    } catch { toast.error("Error de conexión"); setShowConsole(false); }
+    finally { setSoloRunning(false); }
+  }
+
   // ── Enviar aprobados a EnviaTodo ─────────────────────
   async function sendApproved() {
     if (approvedCount === 0) { toast.error("No hay pedidos aprobados"); return; }
@@ -941,7 +1055,7 @@ function OrdersContent() {
       const res = await fetch("/api/apply/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start", headless: headlessMode }),
+        body: JSON.stringify({ action: "start", headless: headlessMode, scriptName: selectedScript ?? undefined }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1018,6 +1132,45 @@ function OrdersContent() {
               Sync
             </button>
 
+            {/* ── Selector de flujo ───────────────────────────── */}
+            <div className="flex items-center gap-1.5">
+              <select
+                value={selectedScript ?? ""}
+                onChange={(e) => setSelectedScript(e.target.value || null)}
+                title="Selecciona qué flujo/script usar al enviar pedidos"
+                className={cn(
+                  "text-xs rounded-lg px-2.5 py-2 border outline-none cursor-pointer appearance-none font-medium transition-all",
+                  selectedScript
+                    ? "bg-primary-900/25 border-primary-600/50 text-primary-300 hover:border-primary-500"
+                    : "bg-dark-800 border-dark-700 text-dark-400 hover:border-dark-600"
+                )}
+              >
+                <option value="">⚙️ Flujo automático</option>
+                {availableScripts.length > 0 && (
+                  <optgroup label="Scripts guardados">
+                    {availableScripts.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        📄 {s.name.replace(/\.ts$/, "")} ({s.stepCount} pasos)
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+
+              {/* Botón "Solo ejecutar" — solo visible si hay script seleccionado */}
+              {selectedScript && (
+                <button
+                  onClick={runScriptAlone}
+                  disabled={soloRunning || consoleRunning}
+                  title={`Ejecutar ${selectedScript} sin datos de pedido`}
+                  className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium border transition-all bg-dark-800 border-dark-700 text-dark-400 hover:border-primary-500 hover:text-primary-300 hover:bg-primary-900/15 disabled:opacity-40"
+                >
+                  <Play className="w-3 h-3" />
+                  Solo ejecutar
+                </button>
+              )}
+            </div>
+
             {/* Toggle headless/visible para Chromium */}
             <button
               onClick={() => setHeadlessMode((h) => !h)}
@@ -1045,7 +1198,7 @@ function OrdersContent() {
               )}
             >
               {consoleRunning ? <Spinner className="w-4 h-4" /> : <Send className="w-4 h-4" />}
-              {approvedCount > 0 ? `Enviar ${approvedCount} aprobado(s) a EnviaTodo` : "Enviar aprobados a EnviaTodo"}
+              {approvedCount > 0 ? `Enviar ${approvedCount} aprobado(s)` : "Enviar aprobados"}
             </button>
           </div>
         </div>
@@ -1318,6 +1471,8 @@ function OrdersContent() {
           total={consoleProgress.total}
           errors={consoleProgress.errors}
           currentOrder={consoleProgress.current}
+          height={consoleHeight}
+          onHeightChange={setConsoleHeight}
           onStop={stopBulkApply}
           onClear={clearConsole}
           onClose={() => {

@@ -212,7 +212,7 @@ export async function POST(request: Request) {
   if (action === "list") {
     try {
       const files = fs.readdirSync(SCRIPTS_DIR)
-        .filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
+        .filter((f) => (f.endsWith(".ts") || f.endsWith(".js")) && f !== "playwright.config.ts")
         .map((file): ScriptMeta => {
           const fp = path.join(SCRIPTS_DIR, file);
           const stat = fs.statSync(fp);

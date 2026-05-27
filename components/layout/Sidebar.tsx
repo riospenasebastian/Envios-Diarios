@@ -23,7 +23,7 @@ export default function Sidebar() {
   const { theme, toggle } = useTheme();
 
   return (
-    <aside className="w-[220px] shrink-0 bg-dark-900 border-r border-dark-700/50 flex flex-col">
+    <aside className="w-[220px] xl:w-[240px] 2xl:w-[260px] shrink-0 bg-dark-900 border-r border-dark-700/50 flex flex-col">
 
       {/* ── Brand ─────────────────────────────────────────── */}
       <div className="h-[56px] flex items-center px-4 border-b border-dark-700/50 shrink-0">

@@ -14,7 +14,37 @@ import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 
-const SCRIPTS_DIR = path.join(process.cwd(), "playwright", "scripts");
+const SCRIPTS_DIR    = path.join(process.cwd(), "playwright", "scripts");
+const PW_CONFIG_FILE = path.join(SCRIPTS_DIR, "playwright.config.ts");
+
+/** Asegura que exista un playwright.config.ts que reconozca cualquier .ts como test. */
+function ensurePlaywrightConfig() {
+  if (fs.existsSync(PW_CONFIG_FILE)) {
+    try {
+      const cur = fs.readFileSync(PW_CONFIG_FILE, "utf-8");
+      if (cur.includes("headless se controla desde la CLI")) return;
+      fs.unlinkSync(PW_CONFIG_FILE);   // versión vieja → regenerar
+    } catch { /* sobrescribir */ }
+  }
+  fs.writeFileSync(PW_CONFIG_FILE, `import { defineConfig } from '@playwright/test';
+
+// Auto-generado por la app para que los scripts grabados por codegen
+// (con nombres tipo flujo_YYYYMMDD_HHMM.ts) sean reconocidos como tests.
+// NOTA: el modo headless se controla desde la CLI (--headed) o via env
+// PLAYWRIGHT_HEADLESS=1, NO se hardcodea aquí.
+export default defineConfig({
+  testMatch: ['**/*.ts'],
+  testIgnore: ['**/playwright.config.ts'],
+  reporter: 'line',
+  fullyParallel: false,
+  workers: 1,
+  use: {
+    viewport: { width: 1920, height: 1080 },
+  },
+  timeout: 120_000,
+});
+`, "utf-8");
+}
 
 type RunStatus = "idle" | "running" | "done" | "error" | "stopped";
 
@@ -26,7 +56,7 @@ let startedAt: string | null = null;
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { action, script } = body as { action: string; script?: string };
+  const { action, script, headless } = body as { action: string; script?: string; headless?: boolean };
 
   // ── START ────────────────────────────────────────────
   if (action === "start") {
@@ -55,17 +85,18 @@ export async function POST(request: Request) {
     runOutput = `[${startedAt}] Iniciando script: ${script}\n`;
     runStatus = "running";
 
-    // Para scripts de test (@playwright/test): npx playwright test --headed --reporter=line
+    // Para scripts de test (@playwright/test): npx playwright test --config ... --headed --reporter=line
     // Para scripts estándar (playwright):      npx tsx <archivo>
-    const args: string[] = isTestFile
-      ? [
-  "playwright",
-  "test",
-  path.basename(scriptPath),
-  "--headed",
-  "--reporter=line"
-]
-      : ["tsx", scriptPath];
+    if (isTestFile) ensurePlaywrightConfig();
+    const wantsHeadless = headless ?? false;   // standalone default: visible
+    const baseTestArgs: string[] = [
+      "playwright", "test",
+      path.basename(scriptPath),
+      "--config", "playwright.config.ts",
+      "--reporter=line",
+    ];
+    if (!wantsHeadless) baseTestArgs.push("--headed");
+    const args: string[] = isTestFile ? baseTestArgs : ["tsx", path.basename(scriptPath)];
 
     runOutput += `[CMD] npx ${args.join(" ")}\n`;
 
@@ -78,6 +109,7 @@ export async function POST(request: Request) {
   env: {
     ...process.env,
     FORCE_COLOR: "0",
+    PLAYWRIGHT_HEADLESS: wantsHeadless ? "1" : "0",
   },
 });
 
