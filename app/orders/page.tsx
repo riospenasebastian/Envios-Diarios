@@ -51,6 +51,8 @@ const AUTO_REFRESH_OPTIONS = [
   { value: "600", label: "10 min" },
 ];
 
+const DEFAULT_ORDERS_FLOW = "__DEFAULT_ORDERS_NAV__";
+
 // ────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────
@@ -759,7 +761,7 @@ function OrdersContent() {
   const [headlessMode, setHeadlessMode] = useState(true);
 
   // ── Selector de flujo ──────────────────────────────────
-  // null = flujo automático built-in; "nombre.ts" = script guardado
+  // null = sin flujo seleccionado; DEFAULT_ORDERS_FLOW = flujo legacy; "nombre.ts" = script guardado
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
   const [availableScripts, setAvailableScripts] = useState<{ name: string; stepCount: number }[]>([]);
   const [soloRunning, setSoloRunning] = useState(false);
@@ -1048,6 +1050,8 @@ function OrdersContent() {
   // ── Enviar aprobados a EnviaTodo ─────────────────────
   async function sendApproved() {
     if (approvedCount === 0) { toast.error("No hay pedidos aprobados"); return; }
+    if (!selectedScript) { toast.error("No hay script seleccionado"); return; }
+    const useDefaultOrdersNavigation = selectedScript === DEFAULT_ORDERS_FLOW;
     setShowConsole(true);
     setConsoleLog("");
     setConsoleProgress({ done: 0, total: 0, errors: 0, current: "" });
@@ -1055,7 +1059,14 @@ function OrdersContent() {
       const res = await fetch("/api/apply/bulk", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start", headless: headlessMode, scriptName: selectedScript ?? undefined }),
+        body: JSON.stringify({
+          action: "start",
+          headless: headlessMode,
+          scriptName: useDefaultOrdersNavigation ? undefined : selectedScript,
+          useDefaultOrdersNavigation,
+          autoNavigateOrders: useDefaultOrdersNavigation,
+          requiresOrdersSection: useDefaultOrdersNavigation,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1145,7 +1156,8 @@ function OrdersContent() {
                     : "bg-dark-800 border-dark-700 text-dark-400 hover:border-dark-600"
                 )}
               >
-                <option value="">⚙️ Flujo automático</option>
+                <option value="">Selecciona un script</option>
+                <option value={DEFAULT_ORDERS_FLOW}>Flujo legacy: navegar a pedidos</option>
                 {availableScripts.length > 0 && (
                   <optgroup label="Scripts guardados">
                     {availableScripts.map((s) => (
@@ -1158,7 +1170,7 @@ function OrdersContent() {
               </select>
 
               {/* Botón "Solo ejecutar" — solo visible si hay script seleccionado */}
-              {selectedScript && (
+              {selectedScript && selectedScript !== DEFAULT_ORDERS_FLOW && (
                 <button
                   onClick={runScriptAlone}
                   disabled={soloRunning || consoleRunning}

@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { applyCorrectionsToEnviaTodo } from "@/services/playwrightService";
 import { log } from "@/services/loggerService";
+import path from "path";
+
+const BUILT_IN_FLOW_FILE = path.join(process.cwd(), "services", "playwrightService.ts");
 
 export async function POST(
   request: Request,
@@ -27,6 +30,22 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    const diag = [
+      "[DIAG] Punto de decision: /api/apply/[id]",
+      "[DIAG] Flujo seleccionado UI: (no aplica; endpoint individual no recibe scriptName)",
+      "[DIAG] Flow ID: (no existe)",
+      "[DIAG] Origen del flujo: configuracion default / built-in",
+      `[DIAG] Fallback/default flow: ${BUILT_IN_FLOW_FILE}`,
+      `[DIAG] Ruta absoluta del flujo activo: ${BUILT_IN_FLOW_FILE}`,
+      "[DIAG] Archivo compilado dist/build/.next: no",
+      `[DIAG] Comando exacto: no usa CLI; llama applyCorrectionsToEnviaTodo()`,
+      `[DIAG] Working directory: ${process.cwd()}`,
+      `[DIAG] Variables entorno relevantes: PLAYWRIGHT_ACTIVE_FLOW_PATH=${BUILT_IN_FLOW_FILE}; NODE_ENV=${process.env.NODE_ENV ?? "(unset)"}`,
+      "[DIAG] Llama funciones de pedidos antes del script: si; ensureLoggedIn -> applyOneOrder -> navigateToOrders",
+    ].join("\n");
+    console.log(diag);
+    process.env.PLAYWRIGHT_ACTIVE_FLOW_PATH = BUILT_IN_FLOW_FILE;
 
     const result = await applyCorrectionsToEnviaTodo(
       order.id,

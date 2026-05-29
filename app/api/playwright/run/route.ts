@@ -17,6 +17,17 @@ import path from "path";
 const SCRIPTS_DIR    = path.join(process.cwd(), "playwright", "scripts");
 const PW_CONFIG_FILE = path.join(SCRIPTS_DIR, "playwright.config.ts");
 
+function diagEnv(values: Record<string, string | undefined>) {
+  return Object.entries(values)
+    .map(([key, value]) => `${key}=${value ?? "(unset)"}`)
+    .join("\n");
+}
+
+function isCompiledPath(filePath: string) {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  return /\/(dist|build|out|compiled|\.next)\//.test(normalized);
+}
+
 /** Asegura que exista un playwright.config.ts que reconozca cualquier .ts como test. */
 function ensurePlaywrightConfig() {
   if (fs.existsSync(PW_CONFIG_FILE)) {
@@ -97,8 +108,29 @@ export async function POST(request: Request) {
     ];
     if (!wantsHeadless) baseTestArgs.push("--headed");
     const args: string[] = isTestFile ? baseTestArgs : ["tsx", path.basename(scriptPath)];
+    const command = `npx ${args.join(" ")}`;
+    const diag = [
+      "[DIAG] Punto de decision: /api/playwright/run",
+      `[DIAG] Flujo seleccionado UI: ${script}`,
+      "[DIAG] Flow ID: (no existe en este runner; se usa nombre de archivo)",
+      "[DIAG] Origen del flujo: archivo local",
+      "[DIAG] Fallback/default flow: ninguno en /api/playwright/run",
+      "[DIAG] Llama funciones de pedidos antes del script: no",
+      `[DIAG] Ruta absoluta ejecutada: ${scriptPath}`,
+      `[DIAG] Archivo compilado dist/build/.next: ${isCompiledPath(scriptPath) ? "si" : "no"}`,
+      `[DIAG] Comando exacto: ${command}`,
+      `[DIAG] Working directory: ${SCRIPTS_DIR}`,
+      "[DIAG] Variables entorno relevantes:",
+      diagEnv({
+        PLAYWRIGHT_HEADLESS: wantsHeadless ? "1" : "0",
+        PLAYWRIGHT_ACTIVE_FLOW_PATH: scriptPath,
+        NODE_ENV: process.env.NODE_ENV,
+      }),
+    ].join("\n");
 
-    runOutput += `[CMD] npx ${args.join(" ")}\n`;
+    runOutput += `${diag}\n`;
+    runOutput += `[CMD] ${command}\n`;
+    console.log(diag);
 
     try {
       runProcess = spawn("npx", args, {
@@ -110,6 +142,7 @@ export async function POST(request: Request) {
     ...process.env,
     FORCE_COLOR: "0",
     PLAYWRIGHT_HEADLESS: wantsHeadless ? "1" : "0",
+    PLAYWRIGHT_ACTIVE_FLOW_PATH: scriptPath,
   },
 });
 

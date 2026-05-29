@@ -29,6 +29,19 @@ import { log } from "@/services/loggerService";
 const SCRIPTS_DIR   = path.join(process.cwd(), "playwright", "scripts");
 const ORDER_CTX_FILE = path.join(process.cwd(), "playwright", "current_order.json");
 const PW_CONFIG_FILE = path.join(SCRIPTS_DIR, "playwright.config.ts");
+const BUILT_IN_FLOW_FILE = path.join(process.cwd(), "services", "playwrightService.ts");
+const DEFAULT_ORDERS_FLOW = "__DEFAULT_ORDERS_NAV__";
+
+function diagEnv(values: Record<string, string | undefined>) {
+  return Object.entries(values)
+    .map(([key, value]) => `${key}=${value ?? "(unset)"}`)
+    .join("\n");
+}
+
+function isCompiledPath(filePath: string) {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  return /\/(dist|build|out|compiled|\.next)\//.test(normalized);
+}
 
 /**
  * Crea (si no existe) un `playwright.config.ts` dentro de SCRIPTS_DIR que
@@ -103,8 +116,32 @@ function runScriptForOrder(scriptName: string, order: BulkOrderInput, headless: 
   if (!headless) baseTestArgs.push("--headed");
 
   const args = isTestFile ? baseTestArgs : ["tsx", scriptBasename];
+  const command = `npx ${args.join(" ")}`;
+  const diag = [
+    "[DIAG] Punto de decision: /api/apply/bulk -> runScriptForOrder",
+    `[DIAG] Flujo seleccionado UI: ${scriptName}`,
+    "[DIAG] Flow ID: (no existe; se usa nombre de archivo local)",
+    "[DIAG] Origen del flujo: archivo local",
+    "[DIAG] Fallback/default flow: ninguno; flujo built-in requiere bandera explicita",
+    "[DIAG] Llama funciones de pedidos antes del script: no; solo escribe current_order.json",
+    `[DIAG] Ruta absoluta ejecutada: ${scriptFullPath}`,
+    `[DIAG] Archivo compilado dist/build/.next: ${isCompiledPath(scriptFullPath) ? "si" : "no"}`,
+    `[DIAG] Comando exacto: ${command}`,
+    `[DIAG] Working directory: ${SCRIPTS_DIR}`,
+    "[DIAG] Variables entorno relevantes:",
+    diagEnv({
+      PLAYWRIGHT_ORDER_ID: order.id,
+      PLAYWRIGHT_ORDER_NUM: order.shopifyOrderNum,
+      PLAYWRIGHT_ORDER_CTX: ORDER_CTX_FILE,
+      PLAYWRIGHT_HEADLESS: headless ? "1" : "0",
+      PLAYWRIGHT_ACTIVE_FLOW_PATH: scriptFullPath,
+      NODE_ENV: process.env.NODE_ENV,
+    }),
+  ].join("\n");
+  console.log(diag);
 
   return new Promise((resolve) => {
+    let output = `${diag}\n`;
     const proc = spawn("npx", args, {
       shell: true,
       cwd: SCRIPTS_DIR,   // ← sin espacios problemáticos en los args
@@ -115,10 +152,10 @@ function runScriptForOrder(scriptName: string, order: BulkOrderInput, headless: 
         PLAYWRIGHT_ORDER_NUM: order.shopifyOrderNum,
         PLAYWRIGHT_ORDER_CTX: ORDER_CTX_FILE,         // ruta absoluta al JSON de contexto
         PLAYWRIGHT_HEADLESS:  headless ? "1" : "0",   // para scripts tsx que lo respeten
+        PLAYWRIGHT_ACTIVE_FLOW_PATH: scriptFullPath,
       },
     });
 
-    let output = "";
     proc.stdout?.on("data", (d: Buffer) => { output += d.toString(); });
     proc.stderr?.on("data", (d: Buffer) => { output += d.toString(); });
     proc.on("error", (err) => resolve({ success: false, output: err.message }));
@@ -151,14 +188,30 @@ function addLine(msg: string) {
 
 export async function POST(request: Request) {
   const body            = await request.json();
-  const { action, debugMode, headless, scriptName } = body as {
+  const {
+    action,
+    debugMode,
+    headless,
+    scriptName,
+    requiresOrdersSection,
+    autoNavigateOrders,
+    useDefaultOrdersNavigation,
+  } = body as {
     action: string;
     debugMode?: boolean;
     headless?: boolean;
     scriptName?: string;
+    requiresOrdersSection?: boolean;
+    autoNavigateOrders?: boolean;
+    useDefaultOrdersNavigation?: boolean;
   };
   const isDebug = debugMode === true;
-  const useScript = scriptName ? path.basename(scriptName) : null;
+  const requestedDefaultOrdersFlow =
+    requiresOrdersSection === true ||
+    autoNavigateOrders === true ||
+    useDefaultOrdersNavigation === true ||
+    scriptName === DEFAULT_ORDERS_FLOW;
+  const useScript = scriptName && scriptName !== DEFAULT_ORDERS_FLOW ? path.basename(scriptName) : null;
 
   // ── START ─────────────────────────────────────────────────────────────────
   if (action === "start") {
@@ -167,6 +220,18 @@ export async function POST(request: Request) {
         success: false,
         message: "Ya hay una automatización activa",
       });
+    }
+
+    if (!useScript && !requestedDefaultOrdersFlow) {
+      const diag = [
+        "[DIAG] Punto de decision: /api/apply/bulk",
+        `[DIAG] Flujo seleccionado UI: ${scriptName ?? "(vacio)"}`,
+        "[DIAG] Resultado: No hay script seleccionado",
+        "[DIAG] Flujo default usado: no",
+        "[DIAG] Navegacion automatica a pedidos omitida: si",
+      ].join("\n");
+      console.log(diag);
+      return NextResponse.json({ success: false, message: "No hay script seleccionado" }, { status: 400 });
     }
 
     const approvedOrders = await prisma.order.findMany({
@@ -192,7 +257,25 @@ export async function POST(request: Request) {
     bulkCurrentOrder = "";
     stopRequested    = false;
 
+    const activeFlowPath = useScript ? path.join(SCRIPTS_DIR, useScript) : BUILT_IN_FLOW_FILE;
+    const decisionDiag = [
+      "[DIAG] Punto de decision: /api/apply/bulk",
+      `[DIAG] Flujo seleccionado UI: ${scriptName ?? "(vacio)"}`,
+      "[DIAG] Flow ID: (no existe en UI/backend actual)",
+      `[DIAG] Origen del flujo: ${useScript ? "archivo local" : "configuracion default / built-in"}`,
+      `[DIAG] Flujo default usado: ${useScript ? "no" : "si"}`,
+      `[DIAG] Fallback/default flow: ${useScript ? "ninguno; si falla nombre/ruta, error" : BUILT_IN_FLOW_FILE}`,
+      `[DIAG] Ruta absoluta del flujo activo: ${activeFlowPath}`,
+      `[DIAG] Archivo compilado dist/build/.next: ${isCompiledPath(activeFlowPath) ? "si" : "no"}`,
+      `[DIAG] Working directory previsto: ${useScript ? SCRIPTS_DIR : process.cwd()}`,
+      `[DIAG] Variables entorno relevantes: PLAYWRIGHT_HEADLESS=${headless === undefined ? "(undefined)" : headless ? "1" : "0"}; PLAYWRIGHT_ACTIVE_FLOW_PATH=${activeFlowPath}; NODE_ENV=${process.env.NODE_ENV ?? "(unset)"}`,
+      `[DIAG] Navegacion automatica a pedidos omitida: ${useScript ? "si" : "no; solicitada por bandera explicita"}`,
+      `[DIAG] Llama funciones de pedidos antes del script: ${useScript ? "no; solo consulta pedidos APPROVED y escribe current_order.json por pedido" : "si; ensureLoggedIn -> applyOneOrder -> navigateToOrders"}`,
+    ].join("\n");
+    console.log(decisionDiag);
+
     addLine(`Iniciando automatización masiva EnviaTodo`);
+    for (const line of decisionDiag.split("\n")) addLine(line);
     addLine(`${bulkTotal} pedido(s) aprobado(s) en cola`);
     addLine(useScript ? `Modo: script → ${useScript}` : `Modo: flujo automático built-in`);
     addLine(`─────────────────────────────────────────`);
@@ -306,6 +389,7 @@ export async function POST(request: Request) {
 
         } else {
           // ── MODO BUILT-IN: flujo automático de playwrightService ────────────
+          process.env.PLAYWRIGHT_ACTIVE_FLOW_PATH = BUILT_IN_FLOW_FILE;
           await bulkApplyCorrections(
             orders.filter(() => !stopRequested || bulkRunning),
 
