@@ -338,6 +338,9 @@ async function validateAndTruncateNameOnlyIfSameCustomer(
 
   const currentName = ((await input.inputValue().catch(() => "")) ?? "").trim();
 
+  // LOG OBLIGATORIO: nombre real leído del popup vs esperado (auditoría de seguridad).
+  addLog?.(`   👤 Nombre en popup: "${currentName}" | Esperado: "${expectedFull}"`);
+
   if (!currentName) {
     return {
       success: false,
@@ -352,12 +355,17 @@ async function validateAndTruncateNameOnlyIfSameCustomer(
 
   const sameFullName = currentNorm === expectedNorm;
   const sameTruncatedName = currentNorm === expected30Norm;
-  const currentIsSafePrefix =
+
+  // El prefijo SOLO sirve para CONFIRMAR identidad (no para autorizar escritura).
+  // Se exige un prefijo largo (≥12 chars) para reducir falsos positivos entre
+  // personas que comparten el inicio del nombre.
+  const currentIsConfirmedPrefix =
     currentName.length <= 30 &&
-    currentNorm.length >= Math.min(10, expectedNorm.length) &&
+    currentNorm.length >= Math.min(12, expectedNorm.length) &&
     expectedNorm.startsWith(currentNorm);
 
-  if (!sameFullName && !sameTruncatedName && !currentIsSafePrefix) {
+  if (!sameFullName && !sameTruncatedName && !currentIsConfirmedPrefix) {
+    addLog?.(`   🛑 Validación de nombre: NO COINCIDE → pedido a revisión manual`);
     return {
       success: false,
       message:
@@ -366,17 +374,29 @@ async function validateAndTruncateNameOnlyIfSameCustomer(
     };
   }
 
-  if (expectedFull.length <= 30) {
-    addLog?.(`   🔒 Nombre validado y no requiere recorte: "${currentName}"`);
-    return { success: true, message: "Nombre validado" };
+  // ── A partir de aquí la identidad está confirmada ────────────────────────────
+  // REGLA DURA: si el nombre del popup ya mide ≤30, NUNCA se toca.
+  // (Cubre: nombre corto, nombre ya recortado, o prefijo del mismo cliente.)
+  // Esto elimina el vector donde se sobrescribía el nombre con `expected30`.
+  if (currentName.length <= 30) {
+    addLog?.(`   🔒 Nombre validado y ≤30 → NO se modifica: "${currentName}"`);
+    return { success: true, message: "Nombre validado, sin cambios" };
   }
 
-  if (sameTruncatedName) {
-    addLog?.(`   🔒 Nombre ya está recortado correctamente: "${currentName}"`);
-    return { success: true, message: "Nombre ya recortado" };
+  // currentName.length > 30: solo recortamos si el popup muestra EXACTAMENTE el
+  // nombre completo esperado. Si no es match exacto del completo, no recortamos a
+  // ciegas → revisión manual.
+  if (!sameFullName) {
+    addLog?.(`   🛑 Nombre >30 sin match EXACTO del completo → revisión manual`);
+    return {
+      success: false,
+      message:
+        `SEGURIDAD: El nombre del popup mide >30 y no coincide exactamente con el ` +
+        `esperado completo. No se recorta a ciegas. Esperado="${expectedFull}" / En popup="${currentName}".`,
+    };
   }
 
-  addLog?.(`   ✂️ Recortando nombre validado a 30 caracteres: "${expected30}"`);
+  addLog?.(`   ✂️ Recortando nombre CONFIRMADO a 30 caracteres: "${expected30}"`);
 
   const ok = await safeFillInsideAddressModal(
     page,
@@ -390,6 +410,7 @@ async function validateAndTruncateNameOnlyIfSameCustomer(
     return { success: false, message: "El popup se cerró al recortar el nombre" };
   }
 
+  addLog?.(`   ✅ Nombre recortado de forma segura (mismo cliente)`);
   return { success: true, message: "Nombre recortado de forma segura" };
 }
 
@@ -410,8 +431,14 @@ function destinationMatchesExpected(destinoText: string, expectedAddress: string
   const matched = expectedTokens.filter((t) => destinoNorm.includes(t)).length;
   const ratio = matched / expectedTokens.length;
 
+  // DISCRIMINADOR FUERTE: si la dirección esperada tiene número(s) de calle,
+  // al menos uno debe aparecer en el destino. Esto evita confundir la misma
+  // calle con número distinto (otra casa / otro cliente).
+  const expectedNums = expectedTokens.filter((t) => /\d/.test(t));
+  const numsOk = expectedNums.length === 0 || expectedNums.some((n) => destinoNorm.includes(n));
+
   // Exigir coincidencia fuerte de destino. No se usa nombre para abrir.
-  return matched >= 3 && ratio >= 0.75;
+  return matched >= 3 && ratio >= 0.8 && numsOk;
 }
 
 async function getVisibleErrorText(page: Page): Promise<string> {
@@ -759,6 +786,7 @@ export async function openOrder(
   };
 
   const candidates: Candidate[] = [];
+  let anyTableWithBothColumns = false;
 
   for (let t = 0; t < tableCount; t++) {
     const table = tables.nth(t);
@@ -779,8 +807,22 @@ export async function openOrder(
 
     addLog?.(`[4/7] Tabla ${t + 1}: columna Origen=${origenIndex}, Destino=${destinoIndex}`);
 
-    if (destinoIndex === -1) continue;
-    if (origenIndex !== -1 && origenIndex === destinoIndex) continue;
+    // SEGURIDAD: solo operamos en tablas donde ORIGEN y DESTINO estén ambas
+    // claramente identificadas y sean columnas DISTINTAS. Si no, no podemos
+    // garantizar que no tocaremos ORIGEN → se ignora la tabla.
+    if (destinoIndex === -1) {
+      addLog?.(`[4/7] ⏭️ Tabla ${t + 1} sin columna DESTINO identificable → ignorada`);
+      continue;
+    }
+    if (origenIndex === -1) {
+      addLog?.(`[4/7] ⏭️ Tabla ${t + 1} sin columna ORIGEN identificable → ignorada por seguridad`);
+      continue;
+    }
+    if (origenIndex === destinoIndex) {
+      addLog?.(`[4/7] ⏭️ Tabla ${t + 1}: ORIGEN y DESTINO en la misma columna → ignorada por seguridad`);
+      continue;
+    }
+    anyTableWithBothColumns = true;
 
     const rows = table.locator("tbody tr");
     const rowCount = await rows.count().catch(() => 0);
@@ -816,6 +858,16 @@ export async function openOrder(
         origenText,
       });
     }
+  }
+
+  // LOG OBLIGATORIO: cuántas filas candidatas pasaron el match por DESTINO.
+  addLog?.(`[4/7] Filas candidatas por DESTINO: ${candidates.length}`);
+
+  if (!anyTableWithBothColumns) {
+    addLog?.(
+      `[4/7] ❌ SEGURIDAD: No pude identificar con certeza las columnas ORIGEN y DESTINO. No se modifica (revisión manual).`
+    );
+    return false;
   }
 
   if (candidates.length === 0) {
