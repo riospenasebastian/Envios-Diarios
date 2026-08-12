@@ -5,6 +5,7 @@ import {
   buildShopifyMapLink,
   extractCustomerName,
 } from "./shopifyService";
+import { extractCartFormData } from "./shopifyNoteService";
 import { validateAddress } from "./validationService";
 import { applyValidationResult } from "./correctionService";
 import { log } from "./loggerService";
@@ -224,9 +225,34 @@ async function processShopifyOrder(
     orderId = created.id;
   }
 
+  // ── Datos del formulario obligatorio del carrito (notas del pedido) ────────
+  // Si vienen completos son la fuente preferente para colonia y CP.
+  // Si no, validateAddress usa la lógica de siempre.
+  const cartForm = extractCartFormData(shopifyOrder);
+
+  if (cartForm.status === "found") {
+    await log(
+      "[SYNC] NOTE_CART_FORM",
+      `Pedido #${shopifyOrder.order_number} · fuente: shopify_note/cart_form → ` +
+        `${cartForm.data.estado} / ${cartForm.data.municipio} / ` +
+        `${cartForm.data.colonia} / CP ${cartForm.data.cp}`,
+      { level: "INFO", orderId }
+    );
+  } else {
+    await log(
+      "[SYNC] NOTE_CART_FORM",
+      `Pedido #${shopifyOrder.order_number} · fuente: lógica actual — ${cartForm.reason}`,
+      { level: "INFO", orderId }
+    );
+  }
+
   // Validar dirección (siempre, para capturar cambios)
   try {
-    const result = await validateAddress(sa, customerName);
+    const result = await validateAddress(
+      sa,
+      customerName,
+      cartForm.status === "found" ? cartForm.data : null
+    );
     await applyValidationResult(orderId, result);
   } catch (err) {
     await log(

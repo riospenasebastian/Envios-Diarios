@@ -24,7 +24,14 @@ import {
   normalizeColoniaInput,
 } from "./sepomexService";
 import { validateWithMiCp } from "./micodigopostalService";
-import type { ValidationResult, ShopifyAddress, ColoniaRecord } from "@/types";
+import type { CartFormData } from "./shopifyNoteService";
+import type { ValidationResult, ShopifyAddress, ColoniaRecord, ColoniaSugerida } from "@/types";
+
+// Etiquetas de fuente — se anteponen a `notes` para que la UI y los logs
+// digan siempre de dónde salieron colonia y CP.
+const SOURCE_NOTE = "fuente: shopify_note/cart_form";
+const SOURCE_NOTE_CONFLICT = "fuente: shopify_note/cart_form (EN CONFLICTO)";
+const SOURCE_LEGACY = "fuente: lógica actual";
 
 // ─────────────────────────────────────────────────────────
 // Patrones de dirección inválida
@@ -191,10 +198,211 @@ function analyzeAddressLines(
 }
 
 // ─────────────────────────────────────────────────────────
-// Función principal de validación
+// Punto de entrada
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Valida una dirección de Shopify.
+ *
+ * Si el pedido trae los datos del formulario obligatorio del carrito
+ * (`cartForm`), esos datos son la fuente PREFERENTE para colonia y CP.
+ * Si no los trae —o SEPOMEX no está cargado y por tanto no se puede
+ * verificar nada— se usa la lógica de siempre, sin cambios.
+ */
 export async function validateAddress(
+  address: ShopifyAddress,
+  customerName: string,
+  cartForm?: CartFormData | null
+): Promise<ValidationResult> {
+  if (cartForm) {
+    // Sin catálogo SEPOMEX no podemos comprobar la nota contra nada.
+    // Antes que confiar a ciegas, caemos a la lógica actual.
+    const sepomexLoaded = (await getColoniasCount()) > 0;
+    if (sepomexLoaded) {
+      return await validateFromCartForm(address, customerName, cartForm);
+    }
+
+    // La nota existe pero no se pudo verificar: se reporta igual para que la
+    // app la muestre, marcada como NO usada.
+    const legacySinSepomex = await validateAddressLegacy(address, customerName);
+    return {
+      ...legacySinSepomex,
+      notes: legacySinSepomex.notes ? `${SOURCE_LEGACY} · ${legacySinSepomex.notes}` : SOURCE_LEGACY,
+      noteAddress: {
+        ...cartForm,
+        usada: false,
+        motivo: "el catálogo SEPOMEX no está cargado, no se pudo verificar la nota",
+      },
+    };
+  }
+
+  const legacy = await validateAddressLegacy(address, customerName);
+  return {
+    ...legacy,
+    notes: legacy.notes ? `${SOURCE_LEGACY} · ${legacy.notes}` : SOURCE_LEGACY,
+  };
+}
+
+/**
+ * Ruta de la nota del carrito.
+ *
+ * La nota manda, pero nunca a ciegas: antes de usarla se comprueba contra
+ * SEPOMEX que el CP exista en ese estado y que la colonia exista en ese CP.
+ * Si algo no cuadra, el pedido NO se corrige solo — se manda a revisión
+ * manual con el conflicto explicado (la nota no se descarta en silencio).
+ *
+ * El municipio de la nota solo se usa para esta comprobación y para mostrarlo
+ * en la UI. NUNCA se escribe en EnviaTodo: ese campo lo autollena EnviaTodo
+ * al seleccionar la colonia.
+ */
+async function validateFromCartForm(
+  address: ShopifyAddress,
+  customerName: string,
+  cartForm: CartFormData
+): Promise<ValidationResult> {
+  const maxNombre = parseInt(await getSetting("maxNombreChars")) || 30;
+  const maxDir = parseInt(await getSetting("maxDireccionChars")) || 42;
+
+  const addr1 = (address.address1 ?? "").trim();
+  const addr2 = (address.address2 ?? "").trim();
+  const shippingCity = (address.city ?? "").trim();
+  const shippingZip = String(address.zip ?? "").trim().replace(/\D/g, "").padStart(5, "0");
+  const shippingState = resolveStateName((address.province ?? address.province_code ?? "").trim());
+  const noteState = resolveStateName(cartForm.estado);
+
+  // La nota no arregla una calle inválida.
+  if (!addr1 || isInvalidAddress(addr1)) {
+    return {
+      errorType: "DIRECCION_INVALIDA",
+      confidence: "CRITICA",
+      errorDetails: `Dirección "${addr1}" parece inválida o vacía`,
+      notes: `${SOURCE_NOTE} · La nota trae colonia y CP, pero la calle es inválida`,
+      noteAddress: { ...cartForm, usada: false, motivo: "la calle del pedido es inválida" },
+    };
+  }
+
+  const { coloniaCandidate, streetLine } = analyzeAddressLines(addr1, addr2);
+  const cleanStreet = streetLine || addr1;
+  const { address1: splitAddr1, reference: splitRef } = splitAddress(cleanStreet, maxDir);
+  const direccionLarga = cleanStreet.length > maxDir;
+  const nombreLargo = customerName.length > maxNombre;
+
+  /** Conflicto → revisión manual, conservando la dirección original. */
+  function conflicto(detalle: string, sugeridas?: ColoniaSugerida[]): ValidationResult {
+    return {
+      errorType: "SIN_COLONIA",
+      confidence: "BAJA", // → NEEDS_REVIEW en applyValidationResult
+      detectedColonia: cartForm.colonia,
+      suggestedAddress: {
+        address1: direccionLarga ? splitAddr1 : cleanStreet,
+        city: shippingCity,
+        state: shippingState,
+        zip: shippingZip, // CP original: no se toca hasta que un humano decida
+      },
+      errorDetails: `Nota del carrito en conflicto: ${detalle}`,
+      notes: `${SOURCE_NOTE_CONFLICT} · ${detalle} · Requiere revisión manual`,
+      source: "sepomex",
+      coloniasSugeridas: sugeridas,
+      noteAddress: { ...cartForm, usada: false, motivo: detalle },
+    };
+  }
+
+  // ── Compuerta 1: el estado de la nota debe coincidir con el del envío ──────
+  // Evita mandar el paquete a un estado distinto al de la dirección real.
+  if (shippingState && noteState && normalizeText(shippingState) !== normalizeText(noteState)) {
+    return conflicto(
+      `el estado de la nota ("${cartForm.estado}") no coincide con el de la dirección de envío ("${address.province}")`
+    );
+  }
+
+  // ── Compuerta 2: el CP de la nota debe existir en SEPOMEX para ese estado ──
+  const cpData = await getCpInfo(cartForm.cp, cartForm.municipio, noteState);
+  if (!cpData.valid) {
+    return conflicto(`el CP ${cartForm.cp} de la nota no existe en SEPOMEX para ${noteState}`);
+  }
+
+  // ── Compuerta 3: la colonia de la nota debe existir en ese CP ──────────────
+  // Se prefiere la grafía canónica de SEPOMEX: es la que tiene más
+  // probabilidad de coincidir literalmente con el dropdown de EnviaTodo,
+  // que exige coincidencia exacta.
+  let coloniaCanonica: string | null = null;
+  let matchInfo = "";
+
+  const exacta = cpData.colonias.find(
+    (c) => normalizeText(c.colonia) === normalizeText(cartForm.colonia)
+  );
+
+  if (exacta) {
+    coloniaCanonica = exacta.colonia;
+    matchInfo = "coincidencia exacta";
+  } else {
+    const aprox = matchColoniaInList(cartForm.colonia, cpData.colonias);
+    if (aprox && aprox.confidence === "ALTA") {
+      coloniaCanonica = aprox.colonia;
+      matchInfo = `${aprox.matchPct}%`;
+    }
+  }
+
+  if (!coloniaCanonica) {
+    return conflicto(
+      `la colonia "${cartForm.colonia}" de la nota no existe en el CP ${cartForm.cp}`,
+      cpData.colonias.slice(0, 15).map((c) => ({ colonia: c.colonia, cp: c.cp }))
+    );
+  }
+
+  // ── La nota es confiable: es la fuente preferente ─────────────────────────
+  const cpCambia = cartForm.cp !== shippingZip;
+  const coloniaCambia =
+    !coloniaCandidate || normalizeText(coloniaCanonica) !== normalizeText(coloniaCandidate);
+
+  const detalleFuente =
+    `${SOURCE_NOTE} · Estado ${noteState} · Municipio ${cartForm.municipio} · ` +
+    `Colonia "${coloniaCanonica}" (${matchInfo}) · CP ${cartForm.cp}`;
+
+  // Nada que corregir: se devuelve igual que hoy, SIN suggestedAddress, para
+  // no reescribir en EnviaTodo una dirección que ya está bien.
+  if (!cpCambia && !coloniaCambia && !direccionLarga && !nombreLargo) {
+    return {
+      errorType: "OK",
+      confidence: "ALTA",
+      detectedColonia: coloniaCandidate ?? cartForm.colonia,
+      notes: `${detalleFuente} · Confirmado, sin cambios`,
+      source: "sepomex",
+      noteAddress: { ...cartForm, colonia: coloniaCanonica, usada: true },
+    };
+  }
+
+  let errorType: ValidationResult["errorType"];
+  if (nombreLargo && (cpCambia || coloniaCambia || direccionLarga)) errorType = "MULTIPLE_ERRORES";
+  else if (cpCambia) errorType = "CP_INCORRECTO";
+  else if (coloniaCambia) errorType = "COLONIA_MAL_ESCRITA";
+  else if (direccionLarga) errorType = "DIRECCION_LARGA";
+  else errorType = "NOMBRE_LARGO";
+
+  const resultado = buildResult({
+    errorType,
+    confidence: "ALTA",
+    detectedColonia: coloniaCandidate,
+    addr1: direccionLarga ? splitAddr1 : cleanStreet,
+    addr2: addr2 && addr2 !== coloniaCandidate ? addr2 : undefined,
+    // city/state solo alimentan la DB y la UI. EnviaTodo nunca los recibe.
+    city: cartForm.municipio,
+    state: noteState,
+    zip: cartForm.cp,
+    colonia: coloniaCanonica,
+    reference: splitRef || undefined,
+    notes: detalleFuente,
+  });
+
+  resultado.noteAddress = { ...cartForm, colonia: coloniaCanonica, usada: true };
+  return resultado;
+}
+
+// ─────────────────────────────────────────────────────────
+// Función principal de validación (lógica actual — sin cambios)
+// ─────────────────────────────────────────────────────────
+
+async function validateAddressLegacy(
   address: ShopifyAddress,
   customerName: string
 ): Promise<ValidationResult> {

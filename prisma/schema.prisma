@@ -61,6 +61,11 @@ model Order {
   // Formato: [{colonia, cp, matchPct?}]
   sugColoniasJson  String?
 
+  // Dirección que el cliente eligió en el formulario del carrito de Shopify
+  // (llega en note_attributes). JSON: {estado, municipio, colonia, cp, usada, motivo?}
+  // `usada: false` significa que la nota existe pero no pasó las validaciones.
+  noteAddressJson  String?
+
   // EnviaTodo
   enviatodoId      String?
   guideNumber      String?

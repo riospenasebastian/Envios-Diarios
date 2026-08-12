@@ -39,6 +39,12 @@ export interface ShopifyAddress {
   phone?: string;
 }
 
+/** Par nombre/valor de la sección "Información adicional" del pedido en Shopify. */
+export interface ShopifyNoteAttribute {
+  name: string;
+  value: string;
+}
+
 export interface ShopifyOrder {
   id: string;
   order_number: string | number;
@@ -46,6 +52,14 @@ export interface ShopifyOrder {
   created_at: string;
   financial_status?: string;
   fulfillment_status?: string | null;
+  /** Nota libre del cliente. */
+  note?: string | null;
+  /**
+   * Atributos del carrito ("Información adicional" en el admin).
+   * Aquí llegan los datos del formulario obligatorio del carrito:
+   * "Estado validado", "Municipio validado", "Colonia validada", "CP validado".
+   */
+  note_attributes?: ShopifyNoteAttribute[];
   customer: {
     first_name: string;
     last_name: string;
@@ -61,6 +75,18 @@ export interface ColoniaSugerida {
   colonia: string;
   cp: string;
   matchPct?: number;
+}
+
+/** Dirección que el cliente eligió en el formulario del carrito de Shopify. */
+export interface NoteAddress {
+  estado: string;
+  municipio: string;
+  colonia: string;
+  cp: string;
+  /** true = se usó como fuente de colonia/CP. false = existe pero no pasó validación. */
+  usada: boolean;
+  /** Por qué no se usó (solo cuando usada = false). */
+  motivo?: string;
 }
 
 export interface ValidationResult {
@@ -81,6 +107,8 @@ export interface ValidationResult {
   source?: "sepomex" | "micodigopostal" | "manual";
   /** Lista de colonias para el picker de UI (SIN_COLONIA o confianza baja) */
   coloniasSugeridas?: ColoniaSugerida[];
+  /** Dirección leída de las notas del pedido, si el pedido la traía. */
+  noteAddress?: NoteAddress;
 }
 
 export interface ColoniaRecord {
@@ -129,6 +157,7 @@ export interface OrderWithDetails {
   appliedAt?: Date | null;
   enviatodoId?: string | null;
   sugColoniasJson?: string | null;
+  noteAddressJson?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -3,8 +3,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Aplica masivamente todos los pedidos APPROVED en EnviaTodo.
  *
- * IMPORTANTE: abre el navegador UNA sola vez para todos los pedidos.
- *             Nunca abre/cierra el browser por cada pedido.
+ * IMPORTANTE: concurrencia 1 — un pedido a la vez, en orden, sin mezclar.
+ *
+ * NOTA: hoy bulkApplyCorrections abre y cierra un navegador POR PEDIDO
+ *       (ver openEnviaTodoSession dentro del for). Es la causa principal de
+ *       lentitud (~15-25s por pedido en arranque de Chromium + boot de la SPA
+ *       + login). Pendiente: reusar navegador por lote con página nueva por
+ *       pedido. No confundir con paralelizar: la concurrencia sigue en 1.
  *
  * Actions: start | stop | status | clear
  *

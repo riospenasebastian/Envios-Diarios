@@ -164,11 +164,122 @@ function norm(text: string): string {
     .toLowerCase();
 }
 
+// ─── POP-UP PROMOCIONAL (#generic_modal) ─────────────────────────────────────
+// Selectores del modal promocional que EnviaTodo empezó a mostrar y que puede
+// tapar el buscador de la tabla o los botones de guardar.
+const PROMO_MODAL = "#generic_modal.modal.show, #generic_modal.show";
+// Modal de dirección: es el importante. NUNCA se cierra ni se remueve aquí.
+const ADDRESS_MODAL = "#general_modal.modal.show, #general_modal.show";
+
+/**
+ * Cierra o remueve ÚNICAMENTE el modal promocional genérico (#generic_modal).
+ *
+ * Escalera: botón de cierre → Escape → remoción del DOM.
+ *
+ * SEGURIDAD: #general_modal (donde se edita la dirección) no se toca en ninguna
+ * rama. Los pasos que podrían afectarlo —Escape, quitar .modal-backdrop y
+ * body.modal-open— solo se ejecutan si el modal de dirección NO está abierto.
+ * Si lo está, se remueve el promocional y nada más.
+ */
+async function closeGenericPromoModal(page: Page, addLog?: LogCallback): Promise<void> {
+  const isPromoVisible = async () =>
+    await page.locator(PROMO_MODAL).first().isVisible({ timeout: 200 }).catch(() => false);
+
+  if (!(await isPromoVisible())) return;
+
+  const isAddressModalOpenNow = async () =>
+    await page.locator(ADDRESS_MODAL).first().isVisible({ timeout: 200 }).catch(() => false);
+
+  /** Espera a que el promocional desaparezca. */
+  async function promoGone(timeout: number): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      if (!(await isPromoVisible())) return true;
+      await page.waitForTimeout(150);
+    }
+    return !(await isPromoVisible());
+  }
+
+  addLog?.("[POPUP] 🪧 Modal promocional #generic_modal detectado — cerrando...");
+
+  // 1) Botón de cierre, SIEMPRE acotado a #generic_modal.
+  const closeBtn = page
+    .locator(
+      "#generic_modal [data-dismiss='modal'], #generic_modal [data-bs-dismiss='modal'], " +
+        "#generic_modal .close, #generic_modal .btn-close, " +
+        "#generic_modal button[aria-label='Close'], #generic_modal button[aria-label='Cerrar']"
+    )
+    .first();
+
+  if (await closeBtn.isVisible({ timeout: 400 }).catch(() => false)) {
+    await closeBtn.click({ timeout: 2_000 }).catch(() => {});
+    if (await promoGone(1_500)) {
+      addLog?.("[POPUP] ✅ Modal promocional cerrado con su botón de cerrar");
+      return;
+    }
+  }
+
+  // 2) Escape — SOLO si el modal de dirección no está abierto.
+  //    Con el formulario abierto, un Escape lo cerraría y se perdería el pedido.
+  if (await isAddressModalOpenNow()) {
+    addLog?.("[POPUP] ⚠️ Modal de dirección abierto → no se usa Escape (se protege #general_modal)");
+  } else {
+    await page.keyboard.press("Escape").catch(() => {});
+    if (await promoGone(1_200)) {
+      addLog?.("[POPUP] ✅ Modal promocional cerrado con Escape");
+      return;
+    }
+  }
+
+  // 3) Remoción del DOM, acotada.
+  const addressOpen = await isAddressModalOpenNow();
+  const removed = await page
+    .evaluate((protectBackdrop) => {
+      const done: string[] = [];
+
+      const promo = document.querySelector("#generic_modal");
+      if (promo) {
+        promo.remove();
+        done.push("#generic_modal");
+      }
+
+      // El backdrop y body.modal-open pertenecen al modal de dirección cuando
+      // este sigue abierto. En ese caso no se tocan.
+      if (!protectBackdrop) {
+        const backdrops = document.querySelectorAll(".modal-backdrop");
+        backdrops.forEach((b) => b.remove());
+        if (backdrops.length > 0) done.push(`${backdrops.length}× .modal-backdrop`);
+
+        if (document.body.classList.contains("modal-open")) {
+          document.body.classList.remove("modal-open");
+          done.push("body.modal-open");
+        }
+      }
+
+      return done;
+    }, addressOpen)
+    .catch(() => [] as string[]);
+
+  if (removed.length > 0) {
+    addLog?.(`[POPUP] 🧹 Modal promocional removido del DOM: ${removed.join(", ")}`);
+    if (addressOpen) {
+      addLog?.("[POPUP] 🔒 .modal-backdrop y body.modal-open conservados (modal de dirección abierto)");
+    }
+  } else {
+    addLog?.("[POPUP] ⚠️ No se pudo remover el modal promocional");
+  }
+}
+
 async function waitForBlockingOverlaysGone(
   page: Page,
   addLog?: LogCallback,
   timeout = 20_000
 ): Promise<void> {
+  // Un pop-up promocional puede estar tapando la acción que viene.
+  // Se revisa aquí para cubrir de una sola vez todos los puntos del flujo
+  // que ya esperaban a que se fueran los overlays.
+  await closeGenericPromoModal(page, addLog).catch(() => {});
+
   const start = Date.now();
   let logged = false;
 
@@ -216,14 +327,17 @@ async function isAppVisible(page: Page, timeout = 3_000): Promise<boolean> {
 async function isShopOrderReady(page: Page, timeout = 10_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeout) {
+    // Sondeos cortos: son 4 comprobaciones encadenadas, así que un timeout
+    // largo por sondeo hacía que una llamada con `timeout: 500` costara ~2.4s
+    // reales. El resultado es el mismo, solo que se pregunta más barato.
     const ready =
-      (await page.getByText(/Sincronizar órdenes/i).isVisible({ timeout: 500 }).catch(() => false)) ||
-      (await page.getByText(/Configurar Órdenes/i).isVisible({ timeout: 500 }).catch(() => false)) ||
-      (await page.locator('input[type="search"][aria-controls="settings_table"]').first().isVisible({ timeout: 500 }).catch(() => false)) ||
-      (await page.locator("#stores_save_changes_button").isVisible({ timeout: 500 }).catch(() => false));
+      (await page.getByText(/Sincronizar órdenes/i).isVisible({ timeout: 150 }).catch(() => false)) ||
+      (await page.getByText(/Configurar Órdenes/i).isVisible({ timeout: 150 }).catch(() => false)) ||
+      (await page.locator('input[type="search"][aria-controls="settings_table"]').first().isVisible({ timeout: 150 }).catch(() => false)) ||
+      (await page.locator("#stores_save_changes_button").isVisible({ timeout: 150 }).catch(() => false));
 
     if (ready) return true;
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(250);
   }
   return false;
 }
@@ -702,6 +816,9 @@ export async function searchOrder(
     await buscador.waitFor({ state: "visible", timeout: 12_000 });
     await waitForBlockingOverlaysGone(page, addLog, 20_000);
 
+    // El pop-up promocional tapa justamente este buscador.
+    await closeGenericPromoModal(page, addLog).catch(() => {});
+
     await buscador.click({ timeout: 10_000 });
     await buscador.fill("");
     await page.waitForTimeout(150);
@@ -742,6 +859,10 @@ export async function openOrder(
 
     addLog?.(`[4/7] Intentando abrir SOLO DESTINO con: ${label}`);
     await locator.scrollIntoViewIfNeeded().catch(() => {});
+
+    // Un pop-up encima interceptaría el clic sobre la celda DESTINO.
+    await closeGenericPromoModal(page, addLog).catch(() => {});
+
     await locator.click({ force: false });
 
     const opened = await page
@@ -1122,8 +1243,10 @@ async function selectColonia(
       page.locator("input[type='search']").last(),
     ];
 
+    // 250ms por candidato: son 5 y en el peor caso costaban 5s completos.
+    // El primero que exista se sigue tomando igual.
     for (const input of candidates) {
-      if (await input.isVisible({ timeout: 1000 }).catch(() => false)) {
+      if (await input.isVisible({ timeout: 250 }).catch(() => false)) {
         return input;
       }
     }
@@ -1186,26 +1309,29 @@ async function selectColonia(
 
   async function waitMunicipioAutoFill(): Promise<boolean> {
     // No se edita Municipio/Ciudad manualmente. Solo se espera que EnviaTodo lo llene.
+    // Esta comprobación es una validación de seguridad: si el municipio no se
+    // autollena, la colonia no quedó realmente seleccionada. No se debilita.
     const start = Date.now();
 
-    while (Date.now() - start < 8000) {
-      const fields = [
-        page.getByRole("textbox", { name: /Municipio \/ Ciudad/i }),
-        page.getByRole("textbox", { name: /Municipio/i }),
-        page.getByRole("textbox", { name: /Ciudad/i }),
-        page.locator("#general_modal input[placeholder*='Municipio' i]").first(),
-        page.locator("#general_modal input[placeholder*='Ciudad' i]").first(),
-        page.locator("#general_modal input[name*='city' i]").first(),
-        page.locator("#general_modal input[name*='municipio' i]").first(),
-      ];
+    const fields = [
+      page.getByRole("textbox", { name: /Municipio \/ Ciudad/i }),
+      page.getByRole("textbox", { name: /Municipio/i }),
+      page.getByRole("textbox", { name: /Ciudad/i }),
+      page.locator("#general_modal input[placeholder*='Municipio' i]").first(),
+      page.locator("#general_modal input[placeholder*='Ciudad' i]").first(),
+      page.locator("#general_modal input[name*='city' i]").first(),
+      page.locator("#general_modal input[name*='municipio' i]").first(),
+    ];
 
+    while (Date.now() - start < 8000) {
+      // Una sola ida y vuelta por candidato en vez de dos: inputValue con
+      // timeout corto ya falla solo si el campo no existe. Se siguen probando
+      // TODOS los candidatos en cada vuelta, igual que antes.
       for (const field of fields) {
-        if (await field.isVisible({ timeout: 300 }).catch(() => false)) {
-          const value = await field.inputValue().catch(() => "");
-          if ((value ?? "").trim().length > 0) {
-            addLog?.(`   ✅ Municipio / Ciudad autollenado: "${value.trim()}"`);
-            return true;
-          }
+        const value = await field.inputValue({ timeout: 200 }).catch(() => "");
+        if ((value ?? "").trim().length > 0) {
+          addLog?.(`   ✅ Municipio / Ciudad autollenado: "${value.trim()}"`);
+          return true;
         }
       }
 
@@ -1346,6 +1472,10 @@ export async function saveChanges(
     await page.keyboard.press("Tab").catch(() => {});
     await page.waitForTimeout(250);
 
+    // Un pop-up promocional aquí impediría guardar. Se cierra protegiendo
+    // #general_modal, que en este punto está abierto con el formulario lleno.
+    await closeGenericPromoModal(page, addLog).catch(() => {});
+
     // Cerrar popup con Guardar. Si no cierra, no avanzar al botón principal.
     for (let intento = 1; intento <= 3; intento++) {
       addLog?.(`[6/7] Intento ${intento}/3 para cerrar popup con Guardar...`);
@@ -1459,72 +1589,95 @@ async function applyOneOrder(
     reference: order.sugReference ?? undefined,
   };
 
-  const onOrders = await navigateToOrders(page, addLog, false);
-  if (!onOrders) {
-    return {
-      orderId: order.id,
-      shopifyOrderNum: order.shopifyOrderNum,
-      customerName: order.customerName,
-      success: false,
-      message: "No se pudo navegar a la sección de pedidos",
-    };
+  // ── Instrumentación ────────────────────────────────────────────────────────
+  // Mide cada etapa para poder atacar la lentitud con datos reales en vez de
+  // estimaciones. Solo mide: no cambia el flujo ni ninguna decisión.
+  const orderStart = Date.now();
+  const times: string[] = [];
+
+  async function stage<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const t0 = Date.now();
+    try {
+      return await fn();
+    } finally {
+      times.push(`${name}=${Date.now() - t0}ms`);
+    }
   }
 
-  const searched = await searchOrder(page, order, addLog, false);
-  if (!searched) {
-    return {
-      orderId: order.id,
-      shopifyOrderNum: order.shopifyOrderNum,
-      customerName: order.customerName,
-      success: false,
-      message: "Error en búsqueda de pedido",
-    };
-  }
+  try {
+    const onOrders = await stage("navegar", () => navigateToOrders(page, addLog, false));
+    if (!onOrders) {
+      return {
+        orderId: order.id,
+        shopifyOrderNum: order.shopifyOrderNum,
+        customerName: order.customerName,
+        success: false,
+        message: "No se pudo navegar a la sección de pedidos",
+      };
+    }
 
-  const opened = await openOrder(page, order, addLog, false);
-  if (!opened) {
-    return {
-      orderId: order.id,
-      shopifyOrderNum: order.shopifyOrderNum,
-      customerName: order.customerName,
-      success: false,
-      message: `Pedido #${order.shopifyOrderNum} no encontrado o destino no abrió`,
-    };
-  }
+    const searched = await stage("buscar", () => searchOrder(page, order, addLog, false));
+    if (!searched) {
+      return {
+        orderId: order.id,
+        shopifyOrderNum: order.shopifyOrderNum,
+        customerName: order.customerName,
+        success: false,
+        message: "Error en búsqueda de pedido",
+      };
+    }
 
-  const filled = await applyCorrections(page, corrections, order.id, addLog, false);
-  if (!filled.success) {
+    const opened = await stage("abrir", () => openOrder(page, order, addLog, false));
+    if (!opened) {
+      return {
+        orderId: order.id,
+        shopifyOrderNum: order.shopifyOrderNum,
+        customerName: order.customerName,
+        success: false,
+        message: `Pedido #${order.shopifyOrderNum} no encontrado o destino no abrió`,
+      };
+    }
+
+    const filled = await stage("rellenar", () =>
+      applyCorrections(page, corrections, order.id, addLog, false)
+    );
+    if (!filled.success) {
+      return {
+        orderId: order.id,
+        shopifyOrderNum: order.shopifyOrderNum,
+        customerName: order.customerName,
+        success: false,
+        message: filled.message,
+        coloniaWarning: filled.coloniaWarning,
+      };
+    }
+
+    const saved = await stage("guardar", () => saveChanges(page, order.id, addLog, false));
+    if (!saved.success) {
+      return {
+        orderId: order.id,
+        shopifyOrderNum: order.shopifyOrderNum,
+        customerName: order.customerName,
+        success: false,
+        message: saved.message,
+        coloniaWarning: filled.coloniaWarning,
+      };
+    }
+
+    const validated = await stage("validar", () => validateSaved(page, order.id, addLog, false));
     return {
       orderId: order.id,
       shopifyOrderNum: order.shopifyOrderNum,
       customerName: order.customerName,
-      success: false,
-      message: filled.message,
+      success: validated.success,
+      message: validated.message,
       coloniaWarning: filled.coloniaWarning,
     };
+  } finally {
+    addLog?.(
+      `   ⏱ Pedido en ${Date.now() - orderStart} ms · ${times.join(" · ")}`
+    );
   }
-
-  const saved = await saveChanges(page, order.id, addLog, false);
-  if (!saved.success) {
-    return {
-      orderId: order.id,
-      shopifyOrderNum: order.shopifyOrderNum,
-      customerName: order.customerName,
-      success: false,
-      message: saved.message,
-      coloniaWarning: filled.coloniaWarning,
-    };
-  }
-
-  const validated = await validateSaved(page, order.id, addLog, false);
-  return {
-    orderId: order.id,
-    shopifyOrderNum: order.shopifyOrderNum,
-    customerName: order.customerName,
-    success: validated.success,
-    message: validated.message,
-    coloniaWarning: filled.coloniaWarning,
-  };
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1568,11 +1721,8 @@ export async function applyCorrectionsToEnviaTodo(
       sugReference: corrections.reference ?? null,
     };
 
+    // saveChanges ya espera 3s tras el guardado; no se duplica esa espera aquí.
     const result = await applyOneOrder(session.page, orderInput, false, addLog);
-
-    if (result.success) {
-      await session.page.waitForTimeout(3_000);
-    }
 
     await closeEnviaTodoSession(session);
 
@@ -1626,12 +1776,9 @@ export async function bulkApplyCorrections(
           message: "No se pudo iniciar sesión en EnviaTodo",
         };
       } else {
+        // saveChanges ya espera 3s tras el guardado; esta segunda espera de 3s
+        // era una duplicación pura (3s × pedido) y se eliminó.
         result = await applyOneOrder(session.page, order, false, onLog);
-
-        if (result.success) {
-          onLog?.("   ⏳ Esperando cierre seguro antes de cerrar navegador...");
-          await session.page.waitForTimeout(3_000);
-        }
       }
 
       await closeEnviaTodoSession(session);

@@ -10,7 +10,7 @@ import {
   X, Save, Edit3, ChevronDown, Zap, Clock, AlertTriangle,
   User, Hash, Info, Database, Globe, Square, Play,
   StopCircle, Trash2, List, CheckSquare, Copy, Send,
-  Eye, EyeOff, GripVertical,
+  Eye, EyeOff, GripVertical, ClipboardList,
 } from "lucide-react";
 import {
   getStatusColor, getStatusLabel, getConfidenceColor, getConfidenceLabel,
@@ -18,7 +18,7 @@ import {
 } from "@/lib/utils";
 import Spinner from "@/components/ui/Spinner";
 import Modal from "@/components/ui/Modal";
-import type { OrderWithDetails, ColoniaSugerida } from "@/types";
+import type { OrderWithDetails, ColoniaSugerida, NoteAddress } from "@/types";
 
 // ────────────────────────────────────────────────────────
 // Constantes
@@ -85,6 +85,59 @@ function ValidationSourceBadge({ source, notes }: { source?: string | null; note
         : isMiCp ? <Globe className="w-3 h-3 shrink-0 mt-0.5" />
         : <Info className="w-3 h-3 shrink-0 mt-0.5" />}
       <span className="leading-relaxed">{notes || (isSepomex ? "Validado con SEPOMEX" : isMiCp ? "Validado con micodigopostal.org" : "Validado")}</span>
+    </div>
+  );
+}
+
+/**
+ * Muestra la dirección que el cliente eligió en el formulario del carrito
+ * de Shopify (llega en las notas del pedido) y si se usó o no.
+ */
+function NoteAddressCard({ json }: { json?: string | null }) {
+  if (!json) return null;
+
+  let nota: NoteAddress | null = null;
+  try {
+    nota = JSON.parse(json) as NoteAddress;
+  } catch {
+    return null;
+  }
+  if (!nota?.cp) return null;
+
+  const usada = nota.usada;
+
+  return (
+    <div className={cn(
+      "rounded-lg border p-2.5 text-xs",
+      usada
+        ? "bg-sky-900/10 border-sky-700/30 text-sky-300"
+        : "bg-amber-900/10 border-amber-700/30 text-amber-300"
+    )}>
+      <div className="flex items-center gap-1.5 font-medium">
+        <ClipboardList className="w-3.5 h-3.5 shrink-0" />
+        <span>
+          {usada
+            ? "Dirección tomada de las notas del pedido"
+            : "El pedido trae dirección en notas — NO se usó"}
+        </span>
+      </div>
+
+      <div className="mt-1.5 grid grid-cols-[74px_1fr] gap-x-2 gap-y-0.5 text-[11px]">
+        <span className="text-dark-400">Estado</span>
+        <span className="font-medium">{nota.estado}</span>
+        <span className="text-dark-400">Municipio</span>
+        <span className="font-medium">{nota.municipio}</span>
+        <span className="text-dark-400">Colonia</span>
+        <span className="font-medium">{nota.colonia}</span>
+        <span className="text-dark-400">CP</span>
+        <span className="font-medium">{nota.cp}</span>
+      </div>
+
+      {!usada && nota.motivo && (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-amber-400/90">
+          Motivo: {nota.motivo}
+        </p>
+      )}
     </div>
   );
 }
@@ -336,6 +389,9 @@ function DetailPanel({ order, onClose, onAction, actionLoading }: DetailPanelPro
             </div>
           </div>
         )}
+
+        {/* Dirección del formulario del carrito (notas del pedido) */}
+        <NoteAddressCard json={order.noteAddressJson} />
 
         {/* Fuente validación */}
         <ValidationSourceBadge source={null} notes={order.validationNotes} />

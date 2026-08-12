@@ -26,6 +26,9 @@ export async function applyValidationResult(
     ? JSON.stringify(result.coloniasSugeridas)
     : null;
 
+  // Dirección del formulario del carrito de Shopify, para mostrarla en la app.
+  const noteAddressJson = result.noteAddress ? JSON.stringify(result.noteAddress) : null;
+
   await prisma.order.update({
     where: { id: orderId },
     data: {
@@ -42,6 +45,7 @@ export async function applyValidationResult(
       sugColonia: suggestedAddress?.colonia ?? null,
       sugReference: suggestedAddress?.reference ?? null,
       sugColoniasJson,
+      noteAddressJson,
       status,
     },
   });
@@ -168,6 +172,7 @@ export async function revalidateOrder(orderId: string): Promise<void> {
       sugColonia: null,
       sugReference: null,
       sugColoniasJson: null,
+      noteAddressJson: null,
       detectedColonia: null,
     },
   });
