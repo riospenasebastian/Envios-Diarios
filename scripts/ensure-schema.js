@@ -29,7 +29,61 @@ const EXPECTED_COLUMNS = [
   { table: "Order", column: "noteAddressJson", type: "TEXT" },
 ];
 
+/**
+ * Carga DATABASE_URL si no viene ya del entorno.
+ *
+ * En Docker suele venir como variable de entorno real. En local vive en
+ * `.env.local`, que lo lee Next.js pero NO un script de `node` suelto: sin
+ * esto el script arrancaba sin DATABASE_URL y no revisaba nada.
+ * Se parsea a mano para no depender de `dotenv`.
+ */
+function loadDatabaseUrl() {
+  if (process.env.DATABASE_URL) return true;
+
+  const fs = require("fs");
+  const path = require("path");
+
+  // Mismo orden de precedencia que Next.js: .env.local gana sobre .env
+  for (const file of [".env.local", ".env"]) {
+    const ruta = path.join(process.cwd(), file);
+    if (!fs.existsSync(ruta)) continue;
+
+    let contenido;
+    try {
+      contenido = fs.readFileSync(ruta, "utf-8");
+    } catch {
+      continue;
+    }
+
+    for (const linea of contenido.split(/\r?\n/)) {
+      const limpia = linea.trim();
+      if (!limpia || limpia.startsWith("#")) continue;
+
+      const sep = limpia.indexOf("=");
+      if (sep <= 0) continue;
+
+      const clave = limpia.slice(0, sep).trim();
+      if (clave !== "DATABASE_URL") continue;
+
+      // Quitar comillas envolventes si las trae.
+      const valor = limpia.slice(sep + 1).trim().replace(/^["']|["']$/g, "");
+      if (valor) {
+        process.env.DATABASE_URL = valor;
+        console.log(`[ensure-schema] DATABASE_URL leída de ${file}`);
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 async function main() {
+  if (!loadDatabaseUrl()) {
+    console.log("[ensure-schema] Sin DATABASE_URL — se omite la revisión de columnas");
+    return;
+  }
+
   let PrismaClient;
   try {
     ({ PrismaClient } = require("@prisma/client"));
