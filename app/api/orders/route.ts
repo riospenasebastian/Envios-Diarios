@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, ensureSchemaReady } from "@/lib/prisma";
 
 export async function GET(request: Request) {
+  // Primera petición tras un deploy con la base sin migrar: esperar a que las
+  // columnas nuevas estén puestas, para no devolver un 500 pasajero.
+  await ensureSchemaReady();
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const search = searchParams.get("search");
