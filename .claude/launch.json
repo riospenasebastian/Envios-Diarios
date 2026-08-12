@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "//": "Se ENGANCHA al servidor que ya corre desde CLaude\\ (main). No lo lanza. Esa carpeta es la unica con .env.local y prisma/database/envios.db; un servidor arrancado desde este worktree no tendria DATABASE_URL, y dos servidores sobre el mismo SQLite generan bloqueos.",
+      "name": "envios",
+      "url": "http://localhost:3000",
+      "port": 3000
+    }
+  ]
+}

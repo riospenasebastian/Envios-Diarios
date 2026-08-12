@@ -94,10 +94,18 @@ export default function Sidebar() {
           </div>
         </button>
 
-        {/* Version chip */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-800/40">
-          <Zap className="w-3 h-3 text-primary-500 shrink-0" />
-          <span className="text-xs text-dark-600 tabular-nums">Local · v1.0</span>
+        {/* Version chip — sirve para confirmar de un vistazo que corre la
+            versión con los cambios de notas del carrito y pop-ups. */}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-900/20 border border-emerald-700/40">
+          <Zap className="w-3 h-3 text-emerald-400 shrink-0" />
+          <div className="leading-tight">
+            <span className="block text-xs text-emerald-300 tabular-nums font-medium">
+              Local · v1.1
+            </span>
+            <span className="block text-[10px] text-emerald-500/80">
+              Notas del carrito + pop-ups
+            </span>
+          </div>
         </div>
       </div>
     </aside>
