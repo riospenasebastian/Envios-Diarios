@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { prisma, ensureSchemaReady } from "@/lib/prisma";
 import {
   fetchShopifyOrders,
   buildShopifyOrderLink,
@@ -18,6 +18,10 @@ export async function syncShopifyOrders(): Promise<{
   updated: number;
   errors: number;
 }> {
+  // Antes de escribir nada: asegurar que la base tenga las columnas nuevas.
+  // Sin esto, en un contenedor sin migrar fallan TODOS los pedidos del sync.
+  await ensureSchemaReady();
+
   const settings = await getSettings();
   const session = await prisma.syncSession.create({ data: { status: "RUNNING" } });
 
